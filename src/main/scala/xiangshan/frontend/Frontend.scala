@@ -73,7 +73,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val tlbCsr = DelayN(io.tlbCsr, 2)
   val csrCtrl = DelayN(io.csrCtrl, 2)
   val sfence = RegNext(RegNext(io.sfence))
-
   // trigger
   ifu.io.frontendTrigger := csrCtrl.frontend_trigger
   val triggerEn = csrCtrl.trigger_enable

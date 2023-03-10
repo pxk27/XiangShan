@@ -225,11 +225,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     io.refill.valid && (level.U === io.refill.bits.level_dup(0)) && vpn_match(io.refill.bits.req_info_dup(0).vpn, vpn, level),
   }
 
+  // if the req is hypervisor inst or in virtMode, we don't used ptw cache
+  val hyper = stageReq.bits.req_info.virt || stageReq.bits.req_info.hyperinst
+
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN, l1Pre) = {
     val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid) && l1v(i) }
-    val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
+    val hitVec = hitVecT.map(RegEnable(_ && !hyper, stageReq.fire))
 
     // stageDelay, but check for l1
     val hitPPN = DataHoldBypass(ParallelPriorityMux(hitVec zip l1.map(_.ppn)), stageDelay_valid_1cycle)
@@ -274,7 +277,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
 
-    val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
+    val hitVec = RegEnable(hitVec_delay && !hyper, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hit = ParallelOR(hitVec)
@@ -319,7 +322,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
 
-    val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
+    val hitVec = RegEnable(hitVec_delay && !hyper, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
@@ -351,7 +354,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
   val (spHit, spHitData, spPre, spValid) = {
     val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid) && spv(i) }
-    val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
+    val hitVec = hitVecT.map(RegEnable(_ && !hyper, stageReq.fire))
     val hitData = ParallelPriorityMux(hitVec zip sp)
     val hit = ParallelOR(hitVec)
 

@@ -62,17 +62,24 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val sfence = DelayN(io.sfence, q.fenceDelay)
   val csr = io.csr
   val satp = DelayN(io.csr.satp, q.fenceDelay)
-  val flush_mmu = DelayN(sfence.valid || csr.satp.changed, q.fenceDelay)
-  val mmu_flush_pipe = DelayN(sfence.valid && sfence.bits.flushPipe, q.fenceDelay) // for svinval, won't flush pipe
+  val vsatp = DelayN(io.csr.vsatp, q.fenceDelay)
+  val hgatp = DelayN(io.csr.hgatp, q.fenceDelay)
+  val isHyperInst = (0 until Width).map(i => (req(i).bits.hyperinst))
+  val flush_mmu = DelayN(sfence.valid || csr.satp.changed || ((csr.priv.virt || isHyperInst.contains(true.B)) && (csr.vsatp.changed || csr.hgatp.changed)), q.fenceDelay)
+  val mmu_flush_pipe = DelayN((sfence.valid && sfence.bits.flushPipe), q.fenceDelay) // for svinval, won't flush pipe
   val flush_pipe = io.flushPipe
 
   // ATTENTION: csr and flush from backend are delayed. csr should not be later than flush.
   // because, csr will influence tlb behavior.
   val ifecth = if (q.fetchi) true.B else false.B
   val mode = if (q.useDmode) csr.priv.dmode else csr.priv.imode
+  val hmode = Mux(isHyperInst.contains(true.B).asBool(), csr.priv.spvp, mode)
+  val virt = csr.priv.virt
+  val sum = Mux(virt, io.csr.priv.vsum, io.csr.priv.sum)
+  val mxr = Mux(virt, io.csr.priv.vmxr, io.csr.priv.mxr)
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
-    else (satp.mode === 8.U && (mode < ModeM))
+    else ((satp.mode === 8.U || (virt && (vsatp.mode === 8.U || hgatp.mode === 8.U))) && (mode < ModeM))
   val portTranslateEnable = (0 until Width).map(i => vmEnable && !req(i).bits.no_translate)
 
   val req_in = req
@@ -84,11 +91,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   refill_to_mem.memidx := ptw.resp.bits.memidx
 
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
-  entries.io.base_connect(sfence, csr, satp)
+  entries.io.base_connect(sfence, csr, satp, vsatp, hgatp)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
-    entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i)
-    entries.io.w_apply(refill, ptw.resp.bits, io.ptw_replenish)
+    entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, virt || isHyperInst(i))
+    entries.io.w_apply(refill, ptw.resp.bits, io.ptw_replenish, virt || isHyperInst(i))
     resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
     resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
   }
@@ -124,7 +131,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   /************************  main body above | method/log/perf below ****************************/
   def TLBRead(i: Int) = {
     val (e_hit, e_ppn, e_perm, e_super_hit, e_super_ppn, static_pm) = entries.io.r_resp_apply(i)
-    val (p_hit, p_ppn, p_perm) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr))
+    val (e_gvpn, e_super_gvpn) = entries.io.r_resp_gvpn_apply(i)
+    val (p_hit, p_ppn, p_perm, p_gvpn) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr))
     val enable = portTranslateEnable(i)
 
     val hit = e_hit || p_hit
@@ -140,14 +148,18 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     resp(i).bits.memidx := RegNext(req_in(i).bits.memidx)
 
     val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
+    val gvpn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(gvpnLen.W))))
     val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
 
     for (d <- 0 until nRespDups) {
       ppn(d) := Mux(p_hit, p_ppn, e_ppn(d))
+      gvpn(d) := Mux(p_hit, p_gvpn, e_gvpn(d))
       perm(d) := Mux(p_hit, p_perm, e_perm(d))
 
       val paddr = Cat(ppn(d), get_off(req_out(i).vaddr))
+      val gpaddr = Cat(gvpn(d), get_off(req_out(i).vaddr))
       resp(i).bits.paddr(d) := Mux(enable, paddr, vaddr)
+      resp(i).bits.gpaddr(d) := gpaddr
     }
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
@@ -173,20 +185,27 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
     val af = perm.af
     val pf = perm.pf
+    val gpf = perm.gpf
     val ldUpdate = !perm.a && TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) // update A/D through exception
     val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) // update A/D through exception
     val instrUpdate = !perm.a && TlbCmd.isExec(cmd) // update A/D through exception
-    val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!io.csr.priv.sum || ifecth))
-    val ldPermFail = !(modeCheck && (perm.r || io.csr.priv.mxr && perm.x))
+    val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!sum || ifecth))
+    val ldPermFail = !(modeCheck && (perm.r || mxr && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
     val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmd)
+    val ldGPf = gpf && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
+    val stGPf = gpf && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
+    val instrGPf = gpf && TlbCmd.isExec(cmd)
     val fault_valid = portTranslateEnable(idx)
     resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && fault_valid && !af
     resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && fault_valid && !af
     resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && fault_valid && !af
+    resp(idx).bits.excp(nDups).pf.ldG := ldGPf && fault_valid && !af
+    resp(idx).bits.excp(nDups).pf.stG := stGPf && fault_valid && !af
+    resp(idx).bits.excp(nDups).pf.instrG := instrGPf && fault_valid && !af
     // NOTE: pf need && with !af, page fault has higher priority than access fault
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
@@ -210,6 +229,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
     io.ptw.req(idx).bits.vpn := RegNext(get_pn(req_out(idx).vaddr))
     io.ptw.req(idx).bits.memidx := RegNext(req_out(idx).memidx)
+    io.ptw.req(idx).bits.hyperinst := RegNext(req_out(idx).hyperinst)
+    io.ptw.req(idx).bits.hlvx := RegNext(req_out(idx).hlvx)
+    io.ptw.req(idx).bits.virt := RegNext(virt)
   }
 
   def handle_block(idx: Int): Unit = {
@@ -249,7 +271,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
     ptw_req.bits.memidx := miss_req_memidx
-
+    ptw_req.bits.hyperinst := req_out(idx).hyperinst
+    ptw_req.bits.hlvx := req_out(idx).hlvx
+    ptw_req.bits.virt := virt
     // NOTE: when flush pipe, tlb should abandon last req
     // however, some outside modules like icache, dont care flushPipe, and still waiting for tlb resp
     // just resp valid and raise page fault to go through. The pipe(ifu) will abandon it.
@@ -270,8 +294,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   def ptw_resp_bypass(vpn: UInt) = {
     val p_hit = RegNext(ptw.resp.bits.entry.hit(vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.fire)
     val p_ppn = RegEnable(ptw.resp.bits.entry.genPPN(vpn), io.ptw.resp.fire)
+    val p_gvpn = RegEnable(ptw.resp.bits.entry.gvpn, io.ptw.resp.fire)
     val p_perm = RegEnable(ptwresp_to_tlbperm(ptw.resp.bits), io.ptw.resp.fire)
-    (p_hit, p_ppn, p_perm)
+    (p_hit, p_ppn, p_perm, p_gvpn)
   }
 
   // assert
@@ -340,6 +365,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       difftest.io.index := i.U
       difftest.io.l1tlbid := l1tlbid
       difftest.io.satp := io.csr.satp.ppn
+      difftest.io.vsatp := Cat(io.csr.vsatp.mode, io.csr.vsatp.asid, io.csr.vsatp.ppn)
+      difftest.io.hgatp := Cat(io.csr.hgatp.mode, io.csr.hgatp.asid, io.csr.hgatp.ppn)
+      difftest.io.s2xlate := RegNext(req_in(i).bits.hlvx || req_in(i).bits.hyperinst)
       difftest.io.vpn := RegNext(get_pn(req_in(i).bits.vaddr))
       difftest.io.ppn := get_pn(io.requestor(i).resp.bits.paddr(0))
     }

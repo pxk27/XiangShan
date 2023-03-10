@@ -208,6 +208,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val isPrefetchRead = WireInit(s0_uop.ctrl.fuOpType === LSUOpType.prefetch_r)
   val isPrefetchWrite = WireInit(s0_uop.ctrl.fuOpType === LSUOpType.prefetch_w)
   val isHWPrefetch = lfsrc_hwprefetch_select
+  val isHlv = WireInit(LSUOpType.isHlv(s0_uop.ctrl.fuOpType))
+  val isHlvx = WireInit(LSUOpType.isHlvx(s0_uop.ctrl.fuOpType))
 
   // query DTLB
   io.dtlbReq.valid := s0_valid
@@ -217,6 +219,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     Mux(isPrefetchWrite, TlbCmd.write, TlbCmd.read),
     TlbCmd.read
   )
+  io.dtlbReq.bits.hyperinst := isHlv
+  io.dtlbReq.bits.hlvx := isHlvx
   io.dtlbReq.bits.size := LSUOpType.size(s0_uop.ctrl.fuOpType)
   io.dtlbReq.bits.kill := DontCare
   io.dtlbReq.bits.memidx.is_ld := true.B
@@ -396,6 +400,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   val s1_uop = io.in.bits.uop
   val s1_paddr_dup_lsu = io.dtlbResp.bits.paddr(0)
+  val s1_gpaddr_dup_lsu = io.dtlbResp.bits.gpaddr(0)
   val s1_paddr_dup_dcache = io.dtlbResp.bits.paddr(1)
   // af & pf exception were modified below.
   val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
@@ -431,6 +436,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   io.lsq.valid := io.in.valid && !(s1_exception || s1_tlb_miss || io.s1_kill || s1_is_prefetch)
   io.lsq.vaddr := io.in.bits.vaddr
+  io.lsq.gpaddr := s1_gpaddr_dup_lsu
   io.lsq.paddr := s1_paddr_dup_lsu
   io.lsq.uop := s1_uop
   io.lsq.sqIdx := s1_uop.sqIdx
@@ -501,6 +507,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
   // af & pf exception were modified
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp(0).pf.ld
+  io.out.bits.uop.cf.exceptionVec(loadGuestPageFault) := io.dtlbResp.bits.excp(0).pf.ldG
   io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp(0).af.ld
 
   io.out.bits.ptwBack := io.dtlbResp.bits.ptwBack
@@ -928,6 +935,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.loadVaddrIn.valid := load_s1.io.in.valid && !load_s1.io.s1_kill && !load_s1.io.out.bits.isHWPrefetch
   io.lsq.loadVaddrIn.bits.lqIdx := load_s1.io.out.bits.uop.lqIdx
   io.lsq.loadVaddrIn.bits.vaddr := load_s1.io.out.bits.vaddr
+  io.lsq.loadVaddrIn.bits.gpaddr := load_s1.io.out.bits.gpaddr
 
   // when S0 has opportunity to try pointerchasing, make sure it truely goes to S1
   // which is S0's out is ready and dcache is ready

@@ -41,7 +41,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val flush_sbuffer = new SbufferFlushBundle
     val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
-    val exceptionAddr = ValidIO(UInt(VAddrBits.W))
+    val exceptionAddr = ValidIO(new Bundle{
+      val vaddr = UInt(VAddrBits.W)
+      val gpaddr = UInt(GPAddrBits.W)
+    })
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
 
@@ -78,8 +81,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   val fuop_reg = Reg(UInt(8.W))
 
   io.exceptionAddr.valid := atom_override_xtval
-  io.exceptionAddr.bits  := in.src(0)
-
+  io.exceptionAddr.bits.vaddr  := in.src(0)
+  io.exceptionAddr.bits.gpaddr := paddr
   // assign default value to output signals
   io.in.ready          := false.B
 
@@ -157,6 +160,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       exceptionVec(storeAddrMisaligned) := !addrAligned && !isLr
       exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp(0).pf.st
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
+      exceptionVec(storeGuestPageFault) := io.dtlb.resp.bits.excp(0).pf.stG
+      exceptionVec(loadGuestPageFault)  := io.dtlb.resp.bits.excp(0).pf.ldG
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
       static_pm := io.dtlb.resp.bits.static_pm

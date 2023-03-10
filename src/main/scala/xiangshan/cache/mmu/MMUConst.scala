@@ -89,6 +89,7 @@ trait HasTlbConst extends HasXSParameter {
   val ppnLen  = PAddrBits - offLen
   val vpnnLen = 9
   val vpnLen  = VAddrBits - offLen
+  val gvpnLen = GPAddrBits - offLen
   val flagLen = 8
   val pteResLen = XLEN - 44 - 2 - flagLen
   val ppnHignLen = 44 - ppnLen
@@ -194,7 +195,8 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
-  val MemReqWidth = l2tlbParams.llptwsize + 1
+  val MemReqWidth = l2tlbParams.llptwsize + 2
+  val HptwReqID = l2tlbParams.llptwsize + 1
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)
 
@@ -227,12 +229,17 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   }
 
   def MakeAddr(ppn: UInt, off: UInt) = {
-    require(off.getWidth == 9)
+    require(off.getWidth == 9 || off.getWidth == 12)
     Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
   }
 
+
   def getVpnn(vpn: UInt, idx: Int): UInt = {
     vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
+  }
+
+  def getGVpnn(vpn: UInt, idx: Int): UInt = {
+    Mux(idx === 2, vpn(vpnnLen * (idx + 1) + 1, vpnnLen * idx), vpn(vpnnLen * (idx + 1) - 1, vpnnLen * idx))
   }
 
   def getVpnClip(vpn: UInt, level: Int) = {

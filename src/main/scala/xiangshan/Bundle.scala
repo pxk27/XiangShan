@@ -437,9 +437,15 @@ class TlbSatpBundle(implicit p: Parameters) extends SatpStruct {
 
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new TlbSatpBundle()
+  val vsatp = new TlbSatpBundle()
+  val hgatp = new TlbSatpBundle()
   val priv = new Bundle {
     val mxr = Bool()
     val sum = Bool()
+    val vmxr = Bool()
+    val vsum = Bool()
+    val virt = Bool()
+    val spvp = UInt(1.W)
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
   }
@@ -458,7 +464,10 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val addr = UInt(VAddrBits.W)
     val asid = UInt(AsidLength.W)
     val flushPipe = Bool()
+    val hv = Bool()
+    val hg = Bool()
   }
+
 
   override def toPrintable: Printable = {
     p"valid:0x${Hexadecimal(valid)} rs1:${bits.rs1} rs2:${bits.rs2} addr:${Hexadecimal(bits.addr)}, flushPipe:${bits.flushPipe}"
@@ -522,6 +531,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
   val trigger_enable = Output(Vec(10, Bool()))
+  // Virtualization Mode
+  val virtMode = Output(Bool())
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {

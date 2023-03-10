@@ -52,6 +52,7 @@ object genWdata {
 
 class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with HasDCacheParameters{
   val vaddr = UInt(VAddrBits.W)
+  val gpaddr = UInt(GPAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   // val func = UInt(6.W)
   val mask = UInt(8.W)
@@ -151,6 +152,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
 
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
   val vaddr = Output(UInt(VAddrBits.W))
+  val gpaddr = Output(UInt(GPAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
   override val uop = Output(new MicroOp) // for replay

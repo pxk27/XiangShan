@@ -79,6 +79,7 @@ class LqPaddrWriteBundle(implicit p: Parameters) extends XSBundle {
 
 class LqVaddrWriteBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = Output(UInt(VAddrBits.W))
+  val gpaddr = Output(UInt(GPAddrBits.W)) // for guest page fault
   val lqIdx = Output(new LqPtr)
 }
 
@@ -143,6 +144,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // vaddrModule's read port 0 for exception addr, port 1 for uncache vaddr read, port {2, 3} for load replay
   val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 1 + 1 + LoadPipelineWidth, numWrite = LoadPipelineWidth))
   vaddrModule.io := DontCare
+  val gpaddrModule = Module(new SyncDataModuleTemplate(UInt(GPAddrBits.W), LoadQueueSize, numRead = 1 + 1 + LoadPipelineWidth, numWrite = LoadPipelineWidth))
+  gpaddrModule.io := DontCare
   val vaddrTriggerResultModule = Module(new SyncDataModuleTemplate(Vec(3, Bool()), LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth))
   vaddrTriggerResultModule.io := DontCare
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
@@ -227,6 +230,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val debug_mmio = Reg(Vec(LoadQueueSize, Bool())) // mmio: inst is an mmio inst
   val debug_paddr = Reg(Vec(LoadQueueSize, UInt(PAddrBits.W))) // mmio: inst is an mmio inst
 
+  val gpaddr = Reg(Vec(LoadQueueSize, UInt(GPAddrBits.W))) // for guest page fault
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
   val deqPtrExtNext = Wire(new LqPtr)
@@ -445,7 +449,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
       debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio
       debug_paddr(loadWbIndex) := io.loadIn(i).bits.paddr
-
+      gpaddr(loadWbIndex) := io.loadIn(i).bits.paddr
       val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
       if(EnableFastForward){
         miss(loadWbIndex) := dcacheMissed && !io.s2_load_data_forwarded(i) && !io.s2_dcache_require_replay(i)
@@ -516,6 +520,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       vaddrModule.io.wen(i) := true.B
       vaddrModule.io.waddr(i) := io.loadVaddrIn(i).bits.lqIdx.value
       vaddrModule.io.wdata(i) := io.loadVaddrIn(i).bits.vaddr
+
+      gpaddrModule.io.wen(i) := true.B
+      gpaddrModule.io.waddr(i) := io.loadVaddrIn(i).bits.lqIdx.value
+      gpaddrModule.io.wdata(i) := io.loadVaddrIn(i).bits.gpaddr
     }
 
     /**
@@ -1010,8 +1018,9 @@ def detectRollback(i: Int) = {
   // Read vaddr for mem exception
   // no inst will be commited 1 cycle before tval update
   vaddrModule.io.raddr(0) := (deqPtrExt + commitCount).value
+  gpaddrModule.io.raddr(0) := (deqPtrExt + commitCount).value
   io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
-
+  io.exceptionAddr.gpaddr := gpaddrModule.io.rdata(0)
   // read vaddr for mmio, and only port {1} is used
   vaddrModule.io.raddr(1) := deqPtr
 

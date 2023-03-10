@@ -38,6 +38,11 @@ class VaBundle(implicit p: Parameters) extends TlbBundle {
   val off  = UInt(offLen.W)
 }
 
+class GpaBundle(implicit p: Parameters) extends TlbBundle {
+  val gvpn  = UInt(gvpnLen.W)
+  val off  = UInt(offLen.W)
+}
+
 class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   val d = Bool()
   val a = Bool()
@@ -72,6 +77,7 @@ class TlbPMBundle(implicit p: Parameters) extends TlbBundle {
 class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
   val af = Bool() // NOTE: if this is true, just raise af
+  val gpf = Bool() // NOTE: if this is true, just raise gpf
   // pagetable perm (software defined)
   val d = Bool()
   val a = Bool()
@@ -87,6 +93,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.pf
     this.af := item.af
+    this.gpf := item.gpf
     this.d := ptePerm.d
     this.a := ptePerm.a
     this.g := ptePerm.g
@@ -139,13 +146,16 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
   val tag = if (!pageNormal) UInt((vpnLen - vpnnLen).W)
             else UInt(vpnLen.W)
   val asid = UInt(asidLen.W)
+  val vmid = UInt(vmidLen.W)
   val level = if (!pageNormal) Some(UInt(1.W))
               else if (!pageSuper) None
               else Some(UInt(2.W))
   val ppn = if (!pageNormal) UInt((ppnLen - vpnnLen).W)
             else UInt(ppnLen.W)
+  val gvpn = if (!pageNormal) UInt((gvpnLen - vpnnLen).W)
+          else UInt(gvpnLen.W)
   val perm = new TlbPermBundle
-
+  val s2xlate = Bool()
   /** level usage:
    *  !PageSuper: page is only normal, level is None, match all the tag
    *  !PageNormal: page is only super, level is a Bool(), match high 9*2 parts
@@ -156,9 +166,10 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
    *  bits1  0: need mid 9bits
    */
 
-  def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false): Bool = {
+  def hit(vpn: UInt, asid: UInt, s2xlate: Bool, nSets: Int = 1, ignoreAsid: Boolean = false, vmid: UInt = 0.U): Bool = {
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
-
+    val vmid_hit = Mux(s2xlate, this.vmid === vmid, true.B)
+    val s2xlate_hit = this.s2xlate === s2xlate && vmid_hit // entry is the page table of virtual machine whose id is vmid
     // NOTE: for timing, dont care low set index bits at hit check
     //       do not need store the low bits actually
     if (!pageSuper) asid_hit && drop_set_equal(vpn, tag, nSets)
@@ -166,7 +177,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
       val tag_match_hi = tag(vpnnLen*2-1, vpnnLen) === vpn(vpnnLen*3-1, vpnnLen*2)
       val tag_match_mi = tag(vpnnLen-1, 0) === vpn(vpnnLen*2-1, vpnnLen)
       val tag_match = tag_match_hi && (level.get.asBool() || tag_match_mi)
-      asid_hit && tag_match
+      asid_hit && tag_match && s2xlate_hit
     }
     else {
       val tmp_level = level.get
@@ -174,7 +185,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
       val tag_match_mi = tag(vpnnLen*2-1, vpnnLen) === vpn(vpnnLen*2-1, vpnnLen)
       val tag_match_lo = tag(vpnnLen-1, 0) === vpn(vpnnLen-1, 0) // if pageNormal is false, this will always be false
       val tag_match = tag_match_hi && (tmp_level(1) || tag_match_mi) && (tmp_level(0) || tag_match_lo)
-      asid_hit && tag_match
+      asid_hit && tag_match && s2xlate_hit
     }
   }
 
@@ -190,8 +201,13 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
                           else 0.U })
     this.ppn := { if (!pageNormal) item.entry.ppn(ppnLen-1, vpnnLen)
                   else item.entry.ppn }
+    this.gvpn := {
+      if (!pageNormal) item.entry.gvpn(gvpnLen - 1, vpnnLen)
+      else item.entry.gvpn
+    }
     this.perm.apply(item, pm)
-    this
+    this.s2xlate := item.entry.s2xlate
+    this.vmid := item.entry.vmid
   }
 
   // 4KB is normal entry, 2MB/1GB is considered as super entry
@@ -243,10 +259,12 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))
+      val s2xlate = Output(Bool())
     })))
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
       val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
+      val gvpn = Vec(nDups, Output(UInt(gvpnLen.W)))
       val perm = Vec(nDups, Output(new TlbPermBundle()))
     }))
   }
@@ -254,6 +272,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     val wayIdx = Output(UInt(log2Up(nWays).W))
     val data = Output(new PtwResp)
     val data_replenish = Output(new PMPConfig)
+    val s2xlate = Output(Bool())
   }))
   val victim = new Bundle {
     val out = ValidIO(Output(new Bundle {
@@ -265,20 +284,22 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   }
   val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
 
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int): Unit = {
+  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate: Bool): Unit = {
     this.r.req(i).valid := valid
     this.r.req(i).bits.vpn := vpn
+    this.r.req(i).bits.s2xlate := s2xlate
   }
 
   def r_resp_apply(i: Int) = {
     (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
-  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp, data_replenish: PMPConfig): Unit = {
+  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp, data_replenish: PMPConfig, s2xlate: Bool): Unit = {
     this.w.valid := valid
     this.w.bits.wayIdx := wayIdx
     this.w.bits.data := data
     this.w.bits.data_replenish := data_replenish
+    this.w.bits.s2xlate := s2xlate
   }
 
 }
@@ -287,26 +308,31 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))
+      val s2xlate = Output(Bool())
     })))
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
       val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
+      val gvpn = Vec(nDups, Output(UInt(gvpnLen.W)))
       val perm = Vec(nDups, Output(new TlbPermBundle()))
       // below are dirty code for timing optimization
       val super_hit = Output(Bool())
       val super_ppn = Output(UInt(ppnLen.W))
+      val super_gvpn = Vec(nDups, Output(UInt(gvpnLen.W)))
       val spm = Output(new TlbPMBundle)
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
+    val s2xlate = Output(Bool())
     val data = Output(new PtwResp)
     val data_replenish = Output(new PMPConfig)
   }))
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(ports, q)) else null
 
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int): Unit = {
+  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate: Bool): Unit = {
     this.r.req(i).valid := valid
     this.r.req(i).bits.vpn := vpn
+    this.r.req(i).bits.s2xlate := s2xlate
   }
 
   def r_resp_apply(i: Int) = {
@@ -314,8 +340,13 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
     this.r.resp(i).bits.super_hit, this.r.resp(i).bits.super_ppn, this.r.resp(i).bits.spm)
   }
 
-  def w_apply(valid: Bool, data: PtwResp, data_replenish: PMPConfig): Unit = {
+  def r_resp_gvpn_apply(i: Int) = {
+    (this.r.resp(i).bits.gvpn, this.r.resp(i).bits.super_gvpn)
+  }
+
+  def w_apply(valid: Bool, data: PtwResp, data_replenish: PMPConfig, s2xlate: Bool): Unit = {
     this.w.valid := valid
+    this.w.bits.s2xlate := s2xlate
     this.w.bits.data := data
     this.w.bits.data_replenish := data_replenish
   }
@@ -370,6 +401,8 @@ class MemBlockidxBundle(implicit p: Parameters) extends TlbBundle {
 class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val cmd = Output(TlbCmd())
+  val hyperinst = Output(Bool())
+  val hlvx = Output(Bool())
   val size = Output(UInt(log2Ceil(log2Ceil(XLEN/8)+1).W))
   val kill = Output(Bool()) // Use for blocked tlb that need sync with other module like icache
   val memidx = Output(new MemBlockidxBundle)
@@ -391,10 +424,14 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
   val ld = Output(Bool())
   val st = Output(Bool())
   val instr = Output(Bool())
+  val ldG = Output(Bool())
+  val stG = Output(Bool())
+  val instrG = Output(Bool())
 }
 
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val paddr = Vec(nDups, Output(UInt(PAddrBits.W)))
+  val gpaddr = Vec(nDups, Output(UInt(GPAddrBits.W)))
   val miss = Output(Bool())
   val fast_miss = Output(Bool()) // without sram part for timing optimization
   val excp = Vec(nDups, new Bundle {
@@ -456,6 +493,14 @@ class MMUIOBaseBundle(implicit p: Parameters) extends TlbBundle {
     this.sfence <> sfence
     this.csr <> csr
     this.csr.satp := satp
+  }
+
+  def base_connect(sfence: SfenceBundle, csr: TlbCsrBundle, satp: TlbSatpBundle, vsatp: TlbSatpBundle, hgatp: TlbSatpBundle) = {
+    this.sfence <> sfence
+    this.csr <> csr
+    this.csr.satp := satp
+    this.csr.vsatp := vsatp
+    this.csr.hgatp := hgatp
   }
 }
 
@@ -552,12 +597,14 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
 class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwBundle {
   val tag = UInt(tagLen.W)
   val asid = UInt(asidLen.W)
+  val vmid = UInt(vmidLen.W)
   val ppn = UInt(ppnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
   val level = if (hasLevel) Some(UInt(log2Up(Level).W)) else None
   val prefetch = Bool()
   val v = Bool()
-
+  val s2xlate = Bool()
+  val gvpn = UInt(gvpnLen.W)
   def is_normalentry(): Bool = {
     if (!hasLevel) true.B
     else level.get === 2.U
@@ -735,7 +782,9 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
 
 class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W)
-
+  val hyperinst = Bool()
+  val hlvx = Bool()
+  val virt = Bool()
   override def toPrintable: Printable = {
     p"vpn:0x${Hexadecimal(vpn)}"
   }
@@ -749,17 +798,22 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val pf = Bool()
   val af = Bool()
+  val gpf = Bool()
 
-  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt) = {
+  def apply(pf: Bool, af: Bool, gpf: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, gvpn: UInt, vmid:UInt, s2xlate: Bool) = {
     this.entry.level.map(_ := level)
     this.entry.tag := vpn
     this.entry.perm.map(_ := pte.getPerm())
     this.entry.ppn := pte.ppn
     this.entry.prefetch := DontCare
     this.entry.asid := asid
+    this.entry.vmid := vmid // valid when s2xlate is true
     this.entry.v := !pf
+    this.entry.s2xlate := s2xlate
+    this.entry.gvpn := gvpn
     this.pf := pf
     this.af := af
+    this.gpf := gpf
   }
 
   override def toPrintable: Printable = {

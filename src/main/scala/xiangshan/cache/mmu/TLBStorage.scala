@@ -105,13 +105,13 @@ class TLBFA(
     val req = io.r.req(i)
     val resp = io.r.resp(i)
     val access = io.access(i)
-
+    val s2xlate = req.bits.s2xlate
     val vpn = req.bits.vpn
     val vpn_reg = RegEnable(vpn, req.fire())
     val vpn_gen_ppn = if(saveLevel) vpn else vpn_reg
 
     val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
-    val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn, io.csr.satp.asid) && m._1 && !m._2 })
+    val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn, io.csr.satp.asid, s2xlate, vmid = io.csr.hgatp.asid) && m._1 && !m._2 })
 
     hitVec.suggestName("hitVec")
 
@@ -122,9 +122,11 @@ class TLBFA(
     resp.bits.hit := Cat(hitVecReg).orR
     if (nWays == 1) {
       resp.bits.ppn(0) := entries(0).genPPN(saveLevel, req.valid)(vpn_gen_ppn)
+      resp.bits.gvpn(0) := entries(0).gvpn
       resp.bits.perm(0) := entries(0).perm
     } else {
       resp.bits.ppn(0) := ParallelMux(hitVecReg zip entries.map(_.genPPN(saveLevel, req.valid)(vpn_gen_ppn)))
+      resp.bits.gvpn(0) := ParallelMux(hitVecReg zip entries.map(_.gvpn))
       resp.bits.perm(0) := ParallelMux(hitVecReg zip entries.map(_.perm))
     }
 
@@ -134,6 +136,7 @@ class TLBFA(
 
     resp.bits.hit.suggestName("hit")
     resp.bits.ppn.suggestName("ppn")
+    resp.bits.gvpn.suggestName("gvpn")
     resp.bits.perm.suggestName("perm")
   }
 
@@ -142,7 +145,7 @@ class TLBFA(
     entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)
   }
   // write assert, shoulg not duplicate with the existing entries
-  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.hit(io.w.bits.data.entry.tag, io.csr.satp.asid) && vi })
+  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.hit(io.w.bits.data.entry.tag, io.csr.satp.asid, io.w.bits.s2xlate, vmid = io.csr.hgatp.asid) && vi })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegNext(io.w.bits.data.entry.tag)
@@ -156,26 +159,63 @@ class TLBFA(
   }
 
   val sfence = io.sfence
+  val sfence_valid = sfence.valid && !sfence.bits.hg && !sfence.bits.hv
   val sfence_vpn = sfence.bits.addr.asTypeOf(new VaBundle().cloneType).vpn
-  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.asid))
-  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.asid, ignoreAsid = true))
-  when (io.sfence.valid) {
+  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.asid, io.csr.priv.virt, vmid = io.csr.hgatp.asid))
+  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.asid, io.csr.priv.virt, ignoreAsid = true, vmid = io.csr.hgatp.asid))
+  when (sfence_valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
-        // all addr and all asid
-        v.map(_ := false.B)
+        // all addr and all asid when virt == false
+        // all entry which vmid === hgatp.vmid when virt == true
+        v.zipWithIndex.map{ case (a, i) => a := a && !((io.csr.priv.virt === false.B) || (io.csr.priv.virt && entries(i).s2xlate && entries(i).vmid === io.csr.hgatp.asid))}
       }.otherwise {
-        // all addr but specific asid
-        v.zipWithIndex.map{ case (a,i) => a := a & (g(i) | !(entries(i).asid === sfence.bits.asid)) }
+        // when virt == false, host entries(asid == sfence.asid)
+        // when virt == true, guest entries(vimd == hgatp.vmid && asid == sfence.asid)
+        v.zipWithIndex.map{ case (a, i) => a := a && !(!g(i) && ((!io.csr.priv.virt && !entries(i).s2xlate && entries(i).asid === sfence.bits.asid) || (io.csr.priv.virt && entries(i).s2xlate && entries(i).vmid === io.csr.hgatp.asid && entries(i).asid === sfence.bits.asid)))}
       }
     }.otherwise {
       when (sfence.bits.rs2) {
         // specific addr but all asid
-        v.zipWithIndex.map{ case (a,i) => a := a & !sfenceHit_noasid(i) }
+        v.zipWithIndex.map{ case (a, i) => a := a && !sfenceHit_noasid(i) }
       }.otherwise {
         // specific addr and specific asid
-        v.zipWithIndex.map{ case (a,i) => a := a & !(sfenceHit(i) && !g(i)) }
+        v.zipWithIndex.map{ case (a, i) => a := a && !(sfenceHit(i) && !g(i)) }
       }
+    }
+  }
+  val hfencev_valid = sfence.valid && sfence.bits.hv
+  val hfenceg_valid = sfence.valid && sfence.bits.hg
+  // it is similar to sfence in VS mode
+  val hfencev = io.sfence
+  val hfencev_vpn = hfencev.bits.addr.asTyperOf(new VaBundle().cloneType).vpn
+  val hfencevHit = entries.map(_.hit(hfencev_vpn, hfencev.bits.asid, true.B, vmid = io.csr.hgatp.asid))
+  val hfencevHit_noasid = entries.map(_.hit(hfencev_vpn, hfencev.bits.asid, true, ignoreAsid = true))
+  when (hfencev_valid) {
+    when(hfencev.bits.rs1){
+      when(hfencev.bits.rs2){
+        v.zipWithIndex.map{ case (a, i) => a := a && !(entries(i).s2xlate && entries(i).vmid === io.csr.hgatp.asid)}
+      }.otherwise {
+        v.zipWithIndex.map{ case (a, i) => a := a && !(!g(i) && (entries(i).s2xlate && entries(i).vmid === io.csr.hgatp.asid && entries(i).asid === sfence.bits.asid))}
+      }
+    }.otherwise {
+      when (hfencev.bits.rs2) {
+        v.zipWithIndex.map{ case (a, i) => a := a && !hfencevHit_noasid(i) }
+      }.otherwise {
+        v.zipWithIndex.map{ case(a, i) => a:= a && !(hfencevHit(i) && !g(i))}
+      }
+    }
+  }
+  // for H extention, L1TLB store the map of guest vaddr -> host vaddr, don't store guest gpaddr, so we ignore the gaddr of hfence.gvma
+  // So we flush ,in the future, we will gradually perfect it.
+  val hfenceg = io.sfence
+  val hfenceg_vpn = hfenceg.bits.addr.asTyperOf(new GpaBundle().cloneType).vpn // gpaddr
+  // ignore rs1
+  when (hfenceg_valid) {
+    when(hfenceg.bits.rs2){
+        v.zipWithIndex.map { case (a, i) => a := a && !entries(i).s2xlate}
+    }.otherwise{
+        v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate && entries(i).vmid === io.csr.hgatp.asid)}
     }
   }
 
@@ -240,7 +280,7 @@ class TLBSA(
     val req = io.r.req(i)
     val resp = io.r.resp(i)
     val access = io.access(i)
-
+    val s2xlate = req.bits.s2xlate
     val vpn = req.bits.vpn
     val vpn_reg = RegEnable(vpn, req.fire())
 
@@ -252,16 +292,18 @@ class TLBSA(
     entries.io.raddr(i) := ridx
 
     val data = entries.io.rdata(i)
-    val hit = data(0).hit(vpn_reg, io.csr.satp.asid, nSets) && (vidx(0) || vidx_bypass)
+    val hit = data(0).hit(vpn_reg, io.csr.satp.asid, s2xlate, nSets, vmid = io.csr.hgatp.asid) && (vidx(0) || vidx_bypass)
     resp.bits.hit := hit
     for (d <- 0 until nDups) {
       resp.bits.ppn(d) := data(d).genPPN()(vpn_reg)
+      resp.bits.gvpn(d) := data(d).gvpn
       resp.bits.perm(d) := data(d).perm
     }
 
     resp.valid := { RegNext(req.valid) }
     resp.bits.hit.suggestName("hit")
     resp.bits.ppn.suggestName("ppn")
+    resp.bits.gvpn.suggestName("gvpn")
     resp.bits.perm.suggestName("perm")
 
     access.sets := get_set_idx(vpn_reg, nSets) // no use
@@ -295,10 +337,10 @@ class TLBSA(
       access.touch_ways.bits := refill_wayIdx_reg
     }
   }
-
+ // can't get entry's asid vmid, so only care addr
   val sfence = io.sfence
   val sfence_vpn = sfence.bits.addr.asTypeOf(new VaBundle().cloneType).vpn
-  when (io.sfence.valid) {
+  when (io.sfence.valid && !io.sfence.bits.hg) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
         v.map(a => a.map(b => b := false.B))
     }.otherwise {
@@ -481,12 +523,14 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     normalPage.r_req_apply(
       valid = io.r.req(i).valid,
       vpn = io.r.req(i).bits.vpn,
-      i = i
+      i = i,
+      s2xlate = io.r.req(i).bits.s2xlate
     )
     superPage.r_req_apply(
       valid = io.r.req(i).valid,
       vpn = io.r.req(i).bits.vpn,
-      i = i
+      i = i,
+      s2xlate = io.r.req(i).bits.s2xlate
     )
   }
 
@@ -502,10 +546,11 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     rp.bits.hit := np.bits.hit || sp.bits.hit
     for (d <- 0 until nDups) {
       rp.bits.ppn(d) := Mux(sp.bits.hit, sp.bits.ppn(0), np.bits.ppn(d))
+      rp.bits.gvpn(d) := Mux(sp.bits.hit, sp.bits.gvpn(0), np.bits.gvpn(d))
       rp.bits.perm(d) := Mux(sp.bits.hit, sp.bits.perm(0), np.bits.perm(d))
     }
     rp.bits.super_hit := sp.bits.hit
-    rp.bits.super_ppn := sp.bits.ppn(0)
+    rp.bits.super_gvpn := sp.bits.gvpn(0)
     rp.bits.spm := np.bits.perm(0).pm
     assert(!np.bits.hit || !sp.bits.hit || !rp.valid, s"${q.name} storage ports${i} normal and super multi-hit")
   }
@@ -546,14 +591,16 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     else io.w.valid && io.w.bits.data.entry.level.get === 2.U },
     wayIdx = normal_refill_idx,
     data = io.w.bits.data,
-    data_replenish = io.w.bits.data_replenish
+    data_replenish = io.w.bits.data_replenish,
+    s2xlate = io.w.bits.s2xlate
   )
   superPage.w_apply(
     valid = { if (q.normalAsVictim) io.w.valid
     else io.w.valid && io.w.bits.data.entry.level.get =/= 2.U },
     wayIdx = super_refill_idx,
     data = io.w.bits.data,
-    data_replenish = io.w.bits.data_replenish
+    data_replenish = io.w.bits.data_replenish,
+    s2xlate = io.w.bits.s2xlate
   )
 
     // replacement
