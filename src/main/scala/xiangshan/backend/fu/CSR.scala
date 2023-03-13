@@ -390,7 +390,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mie = RegInit(0.U(XLEN.W))
   val mipWire = WireInit(0.U.asTypeOf(new Interrupt))
   val mipReg  = RegInit(0.U(XLEN.W))
-  val mipFixMask = ZeroExt(GenMask(9) | GenMask(5) | GenMask(1), XLEN)
+  val mipMask = ZeroExt(GenMask(9) | GenMask(5) | GenMask(1), XLEN)
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
   val mipWMask = MUX(HasHExtension, (((1 << 2) | (1 << 6) | (1 << 10)) | (1 << 12)), 0).U(XLEN.W) | ((1 << 9) | (1 << 5) | (1 << 1)).U(XLEN.W)
@@ -772,7 +772,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Sepc, sepc, sepcMask, MaskedRegMap.NoSideEffect, sepcMask),
     MaskedRegMap(Scause, scause),
     MaskedRegMap(Stval, stval),
-    MaskedRegMap(Sip, mip.asUInt, sipWMask, MaskedRegMap.Unwritable, sipMask),
+    MaskedRegMap(Sip, mipReg.asUInt, sipWMask, MaskedRegMap.NoSideEffect, sipMask),
 
     //--- Supervisor Protection and Translation ---
     MaskedRegMap(Satp, satp, satpMask, MaskedRegMap.NoSideEffect, satpMask),
@@ -807,7 +807,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mepc, mepc, mepcMask, MaskedRegMap.NoSideEffect, mepcMask),
     MaskedRegMap(Mcause, mcause),
     MaskedRegMap(Mtval, mtval),
-    MaskedRegMap(Mip, mip.asUInt, 0.U(XLEN.W), MaskedRegMap.Unwritable),
+    MaskedRegMap(Mip, mipReg.asUInt, mipMask),
 
     //--- Trigger ---
     MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
@@ -838,8 +838,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
     //--- Hypervisor Trap Handling ---
     MaskedRegMap(Htval, htval),
-    MaskedRegMap(Hip, mip, hipWMask, MaskedRegMap.NoSideEffect, hipRMask),
-    MaskedRegMap(Hvip, mip, hvipMask, MaskedRegMap.NoSideEffect, hvipMask),
+    MaskedRegMap(Hip, mipReg.asUInt, hipWMask, MaskedRegMap.NoSideEffect, hipRMask),
+    MaskedRegMap(Hvip, mipReg.asUInt, hvipMask, MaskedRegMap.NoSideEffect, hvipMask),
     MaskedRegMap(Htinst, htinst),
     MaskedRegMap(Hgeip, hgeip),
 
@@ -860,7 +860,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Vsepc, vsepc),
     MaskedRegMap(Vscause, vscause),
     MaskedRegMap(Vstval, vstval),
-    MaskedRegMap(Vsip, mip, vsip_ie_Mask, (_ << 1), vsip_ie_Mask，(_ >> 1)),
+    MaskedRegMap(Vsip, mipReg.asUInt, vsip_ie_Mask, (_ << 1), vsip_ie_Mask，(_ >> 1)),
     MaskedRegMap(Vsatp, vsatp),
 
     //--- Machine Registers ---
@@ -966,21 +966,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.distribute_csr.w.bits.data := wdata
   csrio.customCtrl.distribute_csr.w.bits.addr := addr
 
-  // Fix Mip/Sip write
-  val fixMapping = Map(
-    MaskedRegMap(Mip, mipReg.asUInt, mipFixMask),
-    MaskedRegMap(Sip, mipReg.asUInt, sipWMask, MaskedRegMap.NoSideEffect, sipMask)
-  )
-  val rdataFix = Wire(UInt(XLEN.W))
-  val wdataFix = LookupTree(func, List(
-    CSROpType.wrt  -> src1,
-    CSROpType.set  -> (rdataFix | src1),
-    CSROpType.clr  -> (rdataFix & (~src1).asUInt),
-    CSROpType.wrti -> csri,
-    CSROpType.seti -> (rdataFix | csri),
-    CSROpType.clri -> (rdataFix & (~csri).asUInt)
-  ))
-  MaskedRegMap.generate(fixMapping, addr, rdataFix, wen && permitted, wdataFix)
 
   when (RegNext(csrio.fpu.fflags.valid)) {
     fcsr := fflags_wfn(update = true)(RegNext(csrio.fpu.fflags.bits))
