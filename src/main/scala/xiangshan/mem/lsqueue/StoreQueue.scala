@@ -109,7 +109,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val gpaddrModule = Module(new SQAddrModule(
     dataWidth = GPAddrBits,
     numEntries = StoreQueueSize,
-    numRead = EnsbufferWidth,
+    numRead = EnsbufferWidth + 1,
     numWrite = StorePipelineWidth,
     numForward = StorePipelineWidth
   ))

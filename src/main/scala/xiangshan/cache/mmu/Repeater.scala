@@ -157,6 +157,9 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val ports = Reg(Vec(Size, Vec(Width, Bool()))) // record which port(s) the entry come from, may not able to cover all the ports
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
+  val gvpn = Reg(Vec(Size, UInt(gvpnLen.W)))
+  val hyperinst = Reg(Vec(Size, Bool()))
+  val hlvx = Reg(Vec(Size, Bool()))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
   val enqPtr = RegInit(0.U(log2Up(Size).W)) // Enq
   val issPtr = RegInit(0.U(log2Up(Size).W)) // Iss to Ptw
@@ -245,6 +248,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.tlb.resp.bits.data.entry := ptwResp.entry
   io.tlb.resp.bits.data.pf := ptwResp.pf
   io.tlb.resp.bits.data.af := ptwResp.af
+  io.tlb.resp.bits.data.gpf := ptwResp.gpf
   io.tlb.resp.bits.data.memidx := memidx(OHToUInt(ptwResp_OldMatchVec))
   io.tlb.resp.bits.vector := resp_vector
 
@@ -253,6 +257,10 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val issue_fire_fake = issue_valid && (io.ptw.req(0).ready || (issue_filtered && false.B /*timing-opt*/))
   io.ptw.req(0).valid := issue_valid && !issue_filtered
   io.ptw.req(0).bits.vpn := vpn(issPtr)
+  io.ptw.req(0).bits.gvpn := gvpn(issPtr)
+  io.ptw.req(0).bits.virt := DontCare
+  io.ptw.req(0).bits.hlvx := hlvx(issPtr)
+  io.ptw.req(0).bits.hyperinst := hyperinst(issPtr)
   io.ptw.resp.ready := true.B
 
   reqs.zipWithIndex.map{
@@ -260,6 +268,9 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
       when (req.valid && canEnqueue) {
         v(enqPtrVec(i)) := !tlb_req_flushed(i)
         vpn(enqPtrVec(i)) := req.bits.vpn
+        gvpn(enqPtrVec(i)) := req.bits.gvpn
+        hlvx(enqPtrVec(i)) := req.bits.hlvx
+        hyperinst(enqPtrVec(i)) := req.bits.hyperinst
         memidx(enqPtrVec(i)) := req.bits.memidx
         ports(enqPtrVec(i)) := req_ports(i).asBools
       }

@@ -65,7 +65,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val vsatp = DelayN(io.csr.vsatp, q.fenceDelay)
   val hgatp = DelayN(io.csr.hgatp, q.fenceDelay)
   val isHyperInst = (0 until Width).map(i => (req(i).bits.hyperinst))
-  val flush_mmu = DelayN(sfence.valid || csr.satp.changed || ((csr.priv.virt || isHyperInst.contains(true.B)) && (csr.vsatp.changed || csr.hgatp.changed)), q.fenceDelay)
+  val flush_mmu = DelayN(sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed, q.fenceDelay)
   val mmu_flush_pipe = DelayN((sfence.valid && sfence.bits.flushPipe), q.fenceDelay) // for svinval, won't flush pipe
   val flush_pipe = io.flushPipe
 
@@ -79,8 +79,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val mxr = Mux(virt, io.csr.priv.vmxr, io.csr.priv.mxr)
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
-    else ((satp.mode === 8.U || (virt && (vsatp.mode === 8.U || hgatp.mode === 8.U))) && (mode < ModeM))
-  val portTranslateEnable = (0 until Width).map(i => vmEnable && !req(i).bits.no_translate)
+    else (satp.mode === 8.U) && (mode < ModeM)
+  val s2xlateEnable_tmp = (0 until Width).map(i => (isHyperInst(i) || virt) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode < ModeM))
+  val s2xlateEnable = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill && s2xlateEnable_tmp(i), resp(i).fire, flush_pipe(i)))
+  val portTranslateEnable = (0 until Width).map(i => (vmEnable || s2xlateEnable(i)) && !req(i).bits.no_translate)
 
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
@@ -213,6 +215,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     resp(idx).bits.excp(nDups).af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmd) && fault_valid
     resp(idx).bits.excp(nDups).af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmd) && fault_valid
     resp(idx).bits.excp(nDups).af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmd) && fault_valid
+    resp(idx).bits.excp(nDups).af.ldG   := DontCare
+    resp(idx).bits.excp(nDups).af.stG   := DontCare
+    resp(idx).bits.excp(nDups).af.instrG:= DontCare
     resp(idx).bits.static_pm.valid := spm_v && fault_valid // ls/st unit should use this mmio, not the result from pmp
     resp(idx).bits.static_pm.bits := !spm.c
   }
@@ -228,6 +233,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       io.ptw.req(idx).valid := false.B
     }
     io.ptw.req(idx).bits.vpn := RegNext(get_pn(req_out(idx).vaddr))
+    io.ptw.req(idx).bits.gvpn := RegNext(get_pn(req_out(idx).vaddr))
     io.ptw.req(idx).bits.memidx := RegNext(req_out(idx).memidx)
     io.ptw.req(idx).bits.hyperinst := RegNext(req_out(idx).hyperinst)
     io.ptw.req(idx).bits.hlvx := RegNext(req_out(idx).hlvx)
@@ -241,6 +247,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     // miss request entries
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
+    val miss_req_gvpn = get_pn(req_out(idx).vaddr)
     val miss_req_memidx = req_out(idx).memidx
     val hit = io.ptw.resp.bits.entry.hit(miss_req_vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.valid
 
@@ -270,6 +277,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ptw_req = io.ptw.req(idx)
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
+    ptw_req.bits.gvpn := miss_req_gvpn
     ptw_req.bits.memidx := miss_req_memidx
     ptw_req.bits.hyperinst := req_out(idx).hyperinst
     ptw_req.bits.hlvx := req_out(idx).hlvx

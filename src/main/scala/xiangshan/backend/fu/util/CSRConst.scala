@@ -292,7 +292,7 @@ trait HasCSRConst {
     }.otherwise{
       ret := 0.U
     }
-    mode >= lowestAccessPrivilegeLevel && !(wen && readOnly)
+    ret
   }
 
   def perfcntPermissionCheck(addr: UInt, mode: UInt, mmask: UInt, smask: UInt): Bool = {

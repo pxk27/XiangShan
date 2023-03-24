@@ -144,6 +144,7 @@ trait HasTlbConst extends HasXSParameter {
     val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := ptwResp.pf
     tp.af := ptwResp.af
+    tp.gpf := ptwResp.gpf
     tp.d := ptePerm.d
     tp.a := ptePerm.a
     tp.g := ptePerm.g
@@ -229,17 +230,25 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   }
 
   def MakeAddr(ppn: UInt, off: UInt) = {
-    require(off.getWidth == 9 || off.getWidth == 12)
+    require(off.getWidth == 9)
     Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
   }
 
+  def MakeGAddr(ppn: UInt, off: UInt) = {
+    require(off.getWidth == 9 || off.getWidth == 11)
+    (Cat(ppn, 0.U(offLen.W)) + Cat(off, 0.U(log2Up(XLEN / 8).W)))(GPAddrBits - 1, 0)
+  }
 
   def getVpnn(vpn: UInt, idx: Int): UInt = {
     vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
   }
 
-  def getGVpnn(vpn: UInt, idx: Int): UInt = {
-    Mux(idx === 2, vpn(vpnnLen * (idx + 1) + 1, vpnnLen * idx), vpn(vpnnLen * (idx + 1) - 1, vpnnLen * idx))
+  def getVpnn(vpn: UInt, idx: UInt): UInt = {
+    Mux(idx === 0.U, vpn(vpnnLen - 1, 0), Mux(idx === 1.U, vpn(vpnnLen * 2 - 1, vpnnLen), vpn(vpnnLen * 3 - 1, vpnnLen * 2)))
+  }
+
+  def getGVpnn(vpn: UInt, idx: UInt): UInt = {
+    Mux(idx === 0.U, vpn(vpnnLen - 1, 0), Mux(idx === 1.U, vpn(vpnnLen * 2 - 1, vpnnLen), vpn(vpnnLen * 3 + 1, vpnnLen * 2)))
   }
 
   def getVpnClip(vpn: UInt, level: Int) = {

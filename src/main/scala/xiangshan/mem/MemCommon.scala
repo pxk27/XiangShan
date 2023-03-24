@@ -94,6 +94,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle) = {
     vaddr := input.vaddr
     paddr := input.paddr
+    gpaddr := input.gpaddr
     mask := input.mask
     data := input.data
     uop := input.uop
@@ -126,6 +127,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle) = {
     vaddr := input.vaddr
     paddr := input.paddr
+    gpaddr := input.gpaddr
     mask := input.mask
     data := input.data
     uop := input.uop

@@ -188,9 +188,9 @@ class TLBFA(
   val hfenceg_valid = sfence.valid && sfence.bits.hg
   // it is similar to sfence in VS mode
   val hfencev = io.sfence
-  val hfencev_vpn = hfencev.bits.addr.asTyperOf(new VaBundle().cloneType).vpn
+  val hfencev_vpn = sfence_vpn
   val hfencevHit = entries.map(_.hit(hfencev_vpn, hfencev.bits.asid, true.B, vmid = io.csr.hgatp.asid))
-  val hfencevHit_noasid = entries.map(_.hit(hfencev_vpn, hfencev.bits.asid, true, ignoreAsid = true))
+  val hfencevHit_noasid = entries.map(_.hit(hfencev_vpn, hfencev.bits.asid, true.B, ignoreAsid = true))
   when (hfencev_valid) {
     when(hfencev.bits.rs1){
       when(hfencev.bits.rs2){
@@ -209,7 +209,7 @@ class TLBFA(
   // for H extention, L1TLB store the map of guest vaddr -> host vaddr, don't store guest gpaddr, so we ignore the gaddr of hfence.gvma
   // So we flush ,in the future, we will gradually perfect it.
   val hfenceg = io.sfence
-  val hfenceg_vpn = hfenceg.bits.addr.asTyperOf(new GpaBundle().cloneType).vpn // gpaddr
+  val hfenceg_vpn = sfence_vpn // gpaddr
   // ignore rs1
   when (hfenceg_valid) {
     when(hfenceg.bits.rs2){
@@ -229,6 +229,9 @@ class TLBFA(
     n.ppn := ns.ppn
     n.tag := ns.tag
     n.asid := ns.asid
+    n.gvpn := ns.gvpn
+    n.vmid := ns.vmid
+    n.s2xlate := ns.s2xlate
     n
   }
 
@@ -550,6 +553,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
       rp.bits.perm(d) := Mux(sp.bits.hit, sp.bits.perm(0), np.bits.perm(d))
     }
     rp.bits.super_hit := sp.bits.hit
+    rp.bits.super_ppn := sp.bits.ppn(0)
     rp.bits.super_gvpn := sp.bits.gvpn(0)
     rp.bits.spm := np.bits.perm(0).pm
     assert(!np.bits.hit || !sp.bits.hit || !rp.valid, s"${q.name} storage ports${i} normal and super multi-hit")

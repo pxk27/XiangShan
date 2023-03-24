@@ -199,6 +199,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     port.bits.debug.robIdx        := DontCare
     port.bits.no_translate        := false.B
     port.bits.debug.isFirstIssue  := DontCare
+    port.bits.hyperinst           := DontCare
+    port.bits.hlvx                := DontCare
   }
 
   /** ITLB & ICACHE sync case

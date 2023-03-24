@@ -208,6 +208,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     this.perm.apply(item, pm)
     this.s2xlate := item.entry.s2xlate
     this.vmid := item.entry.vmid
+    this
   }
 
   // 4KB is normal entry, 2MB/1GB is considered as super entry
@@ -318,7 +319,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
       // below are dirty code for timing optimization
       val super_hit = Output(Bool())
       val super_ppn = Output(UInt(ppnLen.W))
-      val super_gvpn = Vec(nDups, Output(UInt(gvpnLen.W)))
+      val super_gvpn = Output(UInt(gvpnLen.W))
       val spm = Output(new TlbPMBundle)
     }))
   }
@@ -640,7 +641,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     }
   }
 
-  def refill(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B) {
+  def refill(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B, vmid: UInt = 0.U, s2xlate: Bool = false.B, gvpn: UInt = 0.U) {
     require(this.asid.getWidth <= asid.getWidth) // maybe equal is better, but ugly outside
 
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
@@ -650,11 +651,14 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     this.prefetch := prefetch
     this.v := valid
     this.level.map(_ := level)
+    this.vmid := vmid
+    this.s2xlate := s2xlate
+    this.gvpn := gvpn
   }
 
-  def genPtwEntry(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B) = {
+  def genPtwEntry(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B, vmid: UInt = 0.U, s2xlate: Bool = false.B, gvpn: UInt = 0.U) = {
     val e = Wire(new PtwEntry(tagLen, hasPerm, hasLevel))
-    e.refill(vpn, asid, pte, level, prefetch, valid)
+    e.refill(vpn, asid, pte, level, prefetch, valid, vmid, s2xlate, gvpn)
     e
   }
 
@@ -782,6 +786,7 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
 
 class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W)
+  val gvpn = UInt(gvpnLen.W)
   val hyperinst = Bool()
   val hlvx = Bool()
   val virt = Bool()

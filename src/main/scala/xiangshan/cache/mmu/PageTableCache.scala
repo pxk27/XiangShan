@@ -231,8 +231,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN, l1Pre) = {
-    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid) && l1v(i) }
-    val hitVec = hitVecT.map(RegEnable(_ && !hyper, stageReq.fire))
+    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid) && l1v(i) && !hyper }
+    val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
 
     // stageDelay, but check for l1
     val hitPPN = DataHoldBypass(ParallelPriorityMux(hitVec zip l1.map(_.ppn)), stageDelay_valid_1cycle)
@@ -270,14 +270,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val data_resp = DataHoldBypass(l2.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).map { case (wayData, v) =>
-      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid) && v })
+      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid) && v && !hyper })
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
 
-    val hitVec = RegEnable(hitVec_delay && !hyper, stageDelay(1).fire)
+    val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hit = ParallelOR(hitVec)
@@ -315,14 +315,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val data_resp = DataHoldBypass(l3.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).map { case (wayData, v) =>
-      wayData.entries.hit(delay_vpn, io.csr_dup(2).satp.asid) && v })
+      wayData.entries.hit(delay_vpn, io.csr_dup(2).satp.asid) && v  && !hyper })
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
 
-    val hitVec = RegEnable(hitVec_delay && !hyper, stageDelay(1).fire)
+    val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
@@ -354,7 +354,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
   val (spHit, spHitData, spPre, spValid) = {
     val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid) && spv(i) }
-    val hitVec = hitVecT.map(RegEnable(_ && !hyper, stageReq.fire))
+    val hitVec = hitVecT.map(x => RegEnable(x && !hyper, stageReq.fire))
     val hitData = ParallelPriorityMux(hitVec zip sp)
     val hit = ParallelOR(hitVec)
 
@@ -409,6 +409,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toTlb.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level))
   io.resp.bits.toTlb.prefetch := from_pre(stageResp.bits.req_info.source)
   io.resp.bits.toTlb.v := Mux(resp_res.sp.hit, resp_res.sp.v, resp_res.l3.v)
+  io.resp.bits.toTlb.gvpn := DontCare // now page cache don't store guest page
+  io.resp.bits.toTlb.vmid := DontCare
+  io.resp.bits.toTlb.s2xlate := DontCare
   io.resp.valid := stageResp.valid
   XSError(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
   XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")

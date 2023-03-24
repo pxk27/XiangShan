@@ -82,6 +82,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val sfence_dup = Seq.fill(8)(RegNext(sfence_tmp))
   val csr_dup = Seq.fill(7)(RegNext(csr_tmp))
   val satp   = csr_dup(0).satp
+  val hgatp   = csr_dup(0).hgatp
   val priv   = csr_dup(0).priv
   val flush  = sfence_dup(0).valid || satp.changed
 
@@ -99,6 +100,10 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
   val arb2 = Module(new Arbiter(new Bundle {
     val vpn = UInt(vpnLen.W)
+    val gvpn = UInt(gvpnLen.W)
+    val hyperinst = Bool()
+    val hlvx = Bool()
+    val virt = Bool()
     val source = UInt(bSourceWidth.W)
   }, if (l2tlbParams.enablePrefetch) 4 else 3))
   val outArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwResp, 3)).io)
@@ -117,13 +122,21 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   arb2.io.in(InArbPTWPort).valid := ptw.io.llptw.valid
   arb2.io.in(InArbPTWPort).bits.vpn := ptw.io.llptw.bits.req_info.vpn
+  arb2.io.in(InArbPTWPort).bits.gvpn := ptw.io.llptw.bits.req_info.gvpn
   arb2.io.in(InArbPTWPort).bits.source := ptw.io.llptw.bits.req_info.source
+  arb2.io.in(InArbPTWPort).bits.hyperinst := ptw.io.llptw.bits.req_info.hyperinst
+  arb2.io.in(InArbPTWPort).bits.hlvx := ptw.io.llptw.bits.req_info.hlvx
+  arb2.io.in(InArbPTWPort).bits.virt := ptw.io.llptw.bits.req_info.virt
   ptw.io.llptw.ready := arb2.io.in(InArbPTWPort).ready
   block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), !ptw.io.req.ready)
 
   arb2.io.in(InArbTlbPort).valid := arb1.io.out.valid
   arb2.io.in(InArbTlbPort).bits.vpn := arb1.io.out.bits.vpn
+  arb2.io.in(InArbTlbPort).bits.gvpn := arb1.io.out.bits.gvpn
   arb2.io.in(InArbTlbPort).bits.source := arb1.io.chosen
+  arb2.io.in(InArbTlbPort).bits.hyperinst := arb1.io.out.bits.hyperinst
+  arb2.io.in(InArbTlbPort).bits.virt := arb1.io.out.bits.virt
+  arb2.io.in(InArbTlbPort).bits.hlvx := arb1.io.out.bits.hlvx
   if (l2tlbParams.enablePrefetch) {
     val prefetch = Module(new L2TlbPrefetch())
     val recv = cache.io.resp
@@ -134,7 +147,14 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     prefetch.io.in.bits.vpn := recv.bits.req_info.vpn
     prefetch.io.sfence := sfence_dup(0)
     prefetch.io.csr := csr_dup(0)
-    arb2.io.in(InArbPrefetchPort) <> prefetch.io.out
+    arb2.io.in(InArbPrefetchPort).bits.vpn := prefetch.io.out.bits.vpn
+    arb2.io.in(InArbPrefetchPort).bits.source := prefetch.io.out.bits.source
+    arb2.io.in(InArbPrefetchPort).bits.gvpn := DontCare
+    arb2.io.in(InArbPrefetchPort).bits.hlvx := DontCare
+    arb2.io.in(InArbPrefetchPort).bits.hyperinst := DontCare
+    arb2.io.in(InArbPrefetchPort).bits.virt := DontCare
+    prefetch.io.out.ready := arb2.io.in(InArbPrefetchPort).ready
+    arb2.io.in(InArbPrefetchPort).valid := prefetch.io.out.valid
 
     val L2TlbPrefetchTable = ChiselDB.createTable("L2TlbPrefetch_hart" + p(XSCoreParamsKey).HartId.toString, new L2TlbPrefetchDB)
     val L2TlbPrefetchDB = Wire(new L2TlbPrefetchDB)
@@ -166,6 +186,10 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
+  cache.io.req.bits.req_info.gvpn := arb2.io.out.bits.gvpn
+  cache.io.req.bits.req_info.hlvx := arb2.io.out.bits.hlvx
+  cache.io.req.bits.req_info.hyperinst := arb2.io.out.bits.hyperinst
+  cache.io.req.bits.req_info.virt := arb2.io.out.bits.virt
   cache.io.req.bits.req_info.source := arb2.io.out.bits.source
   cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
   cache.io.req.bits.bypassed.map(_ := false.B)
@@ -217,8 +241,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val llptw_out = llptw.io.out
   val llptw_mem = llptw.io.mem
   llptw_mem.req_mask := waiting_resp.take(l2tlbParams.llptwsize)
-  ptw.io.mem.mask := waiting_resp.last
-
+  ptw.io.mem.mask := waiting_resp.take(l2tlbParams.llptwsize + 1).last
+  hptw.io.mem.mask := waiting_resp.take(l2tlbParams.llptwsize + 2).last
   val mem_arb = Module(new Arbiter(new L2TlbMemReqBundle(), 3))
   mem_arb.io.in(0) <> ptw.io.mem.req
   mem_arb.io.in(1) <> llptw_mem.req
@@ -278,7 +302,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // save only one pte for each id
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
   val resp_pte = VecInit((0 until MemReqWidth).map(i =>
-    if (i == l2tlbParams.llptwsize) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), mem_resp_done && !mem_resp_from_llptw) }
+    if (i == FsmReqID) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), mem_resp_done && !mem_resp_from_llptw && !mem_resp_from_hptw) }
+    else if( i == HptwReqID) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), mem_resp_done && !mem_resp_from_llptw && mem_resp_from_ptw)}
     else { DataHoldBypass(get_part(refill_data, req_addr_low(i)), llptw_mem.buffer_it(i)) }
     // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
   ))
@@ -289,11 +314,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // mem -> ptw
   ptw.io.mem.req.ready := mem.a.ready
   ptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_ptw
-  ptw.io.mem.resp.bits := resp_pte.last
+  ptw.io.mem.resp.bits := resp_pte.take(l2tlbParams.llptwsize + 1).last
   // mem -> cache
   val refill_from_mq = mem_resp_from_llptw
   val refill_level = Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, init = 0.U, ptw.io.mem.req.fire()))
-  val refill_valid = !ptw.io.refill.hyper && mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
+  val refill_valid = !(ptw.io.refill.req_info.hyperinst || ptw.io.refill.req_info.virt) && mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
 
   cache.io.refill.valid := RegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
@@ -307,7 +332,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   hptw.io.llptw <> llptw.io.hptw
   hptw.io.mem.req.ready := mem.a.ready
   hptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_hptw
-  hptw.io.mem.resp.bits := resp_pte.last
+  hptw.io.mem.resp.bits := resp_pte.take(l2tlbParams.llptwsize + 2).last
+  hptw.io.csr := DontCare
+  hptw.io.sfence := DontCare
 
 
   if (env.EnableDifftest) {
@@ -358,10 +385,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     outArb(i).in(outArbCachePort).bits.entry := cache.io.resp.bits.toTlb
     outArb(i).in(outArbCachePort).bits.pf := !cache.io.resp.bits.toTlb.v
     outArb(i).in(outArbCachePort).bits.af := false.B
+    outArb(i).in(outArbCachePort).bits.gpf := false.B
     outArb(i).in(outArbFsmPort).valid := ptw.io.resp.valid && ptw.io.resp.bits.source===i.U
     outArb(i).in(outArbFsmPort).bits := ptw.io.resp.bits.resp
     outArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
-    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(resp_pte(llptw_out.bits.id), llptw_out.bits.req_info.vpn, llptw_out.bits.af, llptw_out.bits.gpf, true, llptw_out.bits.gpaddr)
+    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(resp_pte(llptw_out.bits.id), llptw_out.bits.req_info.vpn, llptw_out.bits.af, llptw_out.bits.gpf, true, llptw_out.bits.gpaddr, llptw_out.bits.s2xlate)
   }
 
   // io.tlb.map(_.resp) <> outArb.map(_.out)
@@ -395,7 +423,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     inner_data(index)
   }
 
-  def pte_to_ptwResp(pte: UInt, vpn: UInt, af: Bool, gpf: Bool, af_first: Boolean, gpaddr: UInt) : PtwResp = {
+  def pte_to_ptwResp(pte: UInt, vpn: UInt, af: Bool, gpf: Bool, af_first: Boolean, gpaddr: UInt, s2xlate: Bool) : PtwResp = {
     val pte_in = pte.asTypeOf(new PteBundle())
     val ptw_resp = Wire(new PtwResp())
     ptw_resp.entry.ppn := pte_in.ppn
@@ -409,6 +437,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     ptw_resp.entry.v := !ptw_resp.pf
     ptw_resp.entry.prefetch := DontCare
     ptw_resp.entry.asid := satp.asid
+    ptw_resp.entry.vmid := hgatp.asid
+    ptw_resp.entry.s2xlate := s2xlate
     ptw_resp
   }
 

@@ -191,7 +191,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   class MstatusStruct extends Bundle {
     val sd = Output(UInt(1.W))
 
-    val pad1 = if (XLEN == 64) Output(UInt(25.W)) else if (HasHExtension) Output(UInt(23.W)) else null
+    val pad1 = if (XLEN == 64 && HasHExtension) Output(UInt(23.W)) else if (XLEN == 64) Output(UInt(25.W)) else null
     val mpv  = if (XLEN == 64 && HasHExtension) Output(UInt(1.W)) else null
     val gva  = if (XLEN == 64 && HasHExtension) Output(UInt(1.W)) else null
     val mbe  = if (XLEN == 64) Output(UInt(1.W)) else null
@@ -383,7 +383,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mtval = RegInit(UInt(XLEN.W), 0.U)
   val mtval2 = RegInit(UInt(XLEN.W), 0.U)
   val mtinst = RegInit(UInt(XLEN.W), 0.U)
-  val mepc = Reg(UInt(XLEN.W))
+  val mepc = RegInit(UInt(XLEN.W), 0.U)
   // Page 36 in riscv-priv: The low bit of mepc (mepc[0]) is always zero.
   val mepcMask = ~(0x1.U(XLEN.W))
 
@@ -393,8 +393,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mipMask = ZeroExt(GenMask(9) | GenMask(5) | GenMask(1), XLEN)
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
-  val mipWMask = MUX(HasHExtension, (((1 << 2) | (1 << 6) | (1 << 10)) | (1 << 12)), 0).U(XLEN.W) | ((1 << 9) | (1 << 5) | (1 << 1)).U(XLEN.W)
-  val mieWMask = MUX(HasHExtension, (((1 << 2) | (1 << 6) | (1 << 10)) | (1 << 12)), 0).U(XLEN.W) | ((1 << 11) | (1 << 9) | (1 << 7) | (1 << 5) | (1 << 3) | (1 << 1).U(XLEN.W)
+  val mip_mie_WMask_H = if(HasHExtension){((1 << 2) | (1 << 6) | (1 << 10) | (1 << 12)).U(XLEN.W)}else{0.U(XLEN.W)}
+
+  val mipWMask = mip_mie_WMask_H | ((1 << 9) | (1 << 5) | (1 << 1)).U(XLEN.W)
+  val mieWMask = mip_mie_WMask_H | ((1 << 11) | (1 << 9) | (1 << 7) | (1 << 5) | (1 << 3) | (1 << 1)).U(XLEN.W)
 
   def getMisaMxl(mxl: BigInt): BigInt = mxl << (XLEN - 2)
   def getMisaExt(ext: Char): Long = 1 << (ext.toInt - 'a'.toInt)
@@ -460,7 +462,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     GenMask(2)              // WPRI
   ), 64)).asUInt
   val mstatusMask = (~ZeroExt((
-    GenMask(XLEN - 2, 36) | // WPRI
+    (if (HasHExtension) {
+      GenMask(XLEN - 2, 40) |
+        GenMask(37, 36) // MBE SBE
+    } else
+      GenMask(XLEN - 2, 36)) | // WPRI
     GenMask(31, 23)       | // WPRI
     GenMask(10, 9)        | // WPRI
     GenMask(6)            | // WPRI
@@ -468,11 +474,18 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   ), 64)).asUInt
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
-  val mideleg = RegInit(UInt(XLEN.W), Mux(HasHExtension, ((1 << 12) | (1 << 10) | (1 << 6) | (1 << 2)).U, 0.U))
+  val midelegInit = if(HasHExtension){((1 << 12) | (1 << 10) | (1 << 6) | (1 << 2)).U}else{0.U}
+  val medelegWMask = if(HasHExtension) {
+      ((1 << 23) | (1 << 22) | (1 << 21) | (1 << 20) | (1 << 15) | (1 << 13) | (1 << 12) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 3) | (1 << 0)).U(XLEN.W)
+  }else {
+    "hb3ff".U(XLEN.W)
+  }
+
+
+  val mideleg = RegInit(UInt(XLEN.W), midelegInit)
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
   val midelegWMask = "h222".U(XLEN.W)
-  val medelegWMask = MUX(HasHExtension, ((1 << 23) | (1 << 22) | (1 << 21) | (1 << 20) | (1 << 15) | (1 << 13) | (1 << 12) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 3) | (1 << 0)).U(XLEN.W), "hb3ff".U(XLEN.W))
 
   // PMP Mapping
   val pmp = Wire(Vec(NumPMP, new PMPEntry())) // just used for method parameter
@@ -509,7 +522,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Page 60 in riscv-priv: The low bit of sepc (sepc[0]) is always zero.
   val sepcMask = ~(0x1.U(XLEN.W))
   val scause = RegInit(UInt(XLEN.W), 0.U)
-  val stval = Reg(UInt(XLEN.W))
+  val stval = RegInit(UInt(XLEN.W), 0.U)
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
 
@@ -615,12 +628,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.svinval_enable := srnctl(1)
   csrio.customCtrl.wfi_enable := srnctl(2)
 
-  val tlbBundle = Wire(new TlbCsrBundle)
-  tlbBundle.satp.apply(satp)
-  tlbBundle.vsatp.apply(vsatp)
-  tlbBundle.hgatp.apply(hgatp)
-  csrio.tlb := tlbBundle
-
   // Hypervisor CSRs
   val hstatusWMask = "h7003c0".U(XLEN.W)
   // hstatus: vtsr, vtw, vtvm, hu, spvp, spv, gva,
@@ -634,8 +641,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val htval = RegInit(UInt(XLEN.W), 0.U)
   // hvip hip hie is part of mip or mie
   val hvipMask = ((1 << 10) | (1 << 6) | (1 << 2)).U(XLEN.W)
-  val hipRMask = ((1 << 12) | hvipMask) & mideleg
-  val hipWMask = (1 << 2).U(XLEN.W) & mideleg// vssip
+  val hipRMask = (((1 << 12).U | hvipMask) & mideleg)
+  val hipWMask = ((1 << 2).U & mideleg)// vssip
   val hieMask = hipRMask
   val htinst = RegInit(UInt(XLEN.W), 0.U)
   val hgeip = RegInit(UInt(XLEN.W), 0.U)
@@ -644,16 +651,23 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val htimedelta = RegInit(UInt(XLEN.W), 0.U)
   val hcounteren = RegInit(UInt(XLEN.W), 0.U)
 
-  val vsstatus = RegInit(("ha00002000" & sstatusRmask).U(XLEN.W))
+  val vsstatus = RegInit("ha00002000".U(XLEN.W))
   val vsstatusStruct = vsstatus.asTypeOf(new MstatusStruct)
   //vsie vsip
   val vsMask = ((1 << 10) | (1 << 6) | (1 << 2)).U(XLEN.W)
-  val vsip_ie_Mask = (hideleg & mideleg & vsMask) >> 1
+  val vsip_ie_Mask = ZeroExt((hideleg & mideleg & vsMask), XLEN)
   val vstvec = RegInit(UInt(XLEN.W), 0.U)
   val vsscratch = RegInit(UInt(XLEN.W), 0.U)
   val vsepc = RegInit(UInt(XLEN.W), 0.U)
   val vscause = RegInit(UInt(XLEN.W), 0.U)
   val vstval = RegInit(UInt(XLEN.W), 0.U)
+  val vsatp = RegInit(UInt(XLEN.W), 0.U)
+
+  val tlbBundle = Wire(new TlbCsrBundle)
+  tlbBundle.satp.apply(satp)
+  tlbBundle.vsatp.apply(vsatp)
+  tlbBundle.hgatp.apply(hgatp)
+  csrio.tlb := tlbBundle
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))
@@ -797,7 +811,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mstatus, mstatus, mstatusWMask, mstatusUpdateSideEffect, mstatusMask),
     MaskedRegMap(Misa, misa, 0.U, MaskedRegMap.Unwritable), // now whole misa is unchangeable
     MaskedRegMap(Medeleg, medeleg, medelegWMask),
-    MaskedRegMap(Mideleg, mideleg, midelegWMask, MaskedRegMap.NoSideEffect, midelegRMask),
+    MaskedRegMap(Mideleg, mideleg, midelegWMask, MaskedRegMap.NoSideEffect),
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
     MaskedRegMap(Mcounteren, mcounteren),
@@ -829,7 +843,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // hypervisor csr map
   val hcsrMapping = Map(
     //--- Hypervisor Trap Setup ---
-    MaskedRegMap(Hstatus, mstatus, hstatusWMask),
+    MaskedRegMap(Hstatus, hstatus, hstatusWMask),
     MaskedRegMap(Hedeleg, hedeleg),
     MaskedRegMap(Hideleg, hideleg, hidelegWMask, MaskedRegMap.NoSideEffect, hidelegRMask),
     MaskedRegMap(Hie, mie, hieMask, MaskedRegMap.NoSideEffect, hieMask),
@@ -853,14 +867,14 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Htimedelta, htimedelta),
 
     //--- Virtual Supervisor Registers ---
-    MaskedRegMap(Vsstatus, vsstatus),
-    MaskedRegMap(Vsie, mie, vsip_ie_Mask, (_ << 1), vsip_ie_Mask，(_ >> 1)),
+    MaskedRegMap(Vsstatus, vsstatus, rmask = sstatusRmask, wmask = sstatusWmask),
+    MaskedRegMap(Vsie, mie, rmask = vsip_ie_Mask, wmask = vsip_ie_Mask),
     MaskedRegMap(Vstvec, vstvec),
     MaskedRegMap(Vsscratch, vsscratch),
     MaskedRegMap(Vsepc, vsepc),
     MaskedRegMap(Vscause, vscause),
     MaskedRegMap(Vstval, vstval),
-    MaskedRegMap(Vsip, mipReg.asUInt, vsip_ie_Mask, (_ << 1), vsip_ie_Mask，(_ >> 1)),
+    MaskedRegMap(Vsip, mipReg.asUInt, vsip_ie_Mask, (_ << 1), vsip_ie_Mask, (_ >> 1)),
     MaskedRegMap(Vsatp, vsatp),
 
     //--- Machine Registers ---
@@ -911,18 +925,19 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     Scause.U   -> Vscause.U,
     Stval.U    -> Vstval.U,
     Sip.U      -> Vsip.U,
-    satp.U     -> Vsatp.U
+    Satp.U     -> Vsatp.U
   )
-  src2(11, 0)
-  val addr = Wire(Uint(12.W))
-  when(virtMode && vs_s_csr_map.contains(src2(11, 0))){
-    addr := vs_s_csr_map.apply(src2(11, 0))
+  val addr = Wire(UInt(12.W))
+  val vscsr_addr = LookupTreeDefault(src2(11, 0), src2(11, 0), vs_s_csr_map)
+  when(virtMode){
+    addr := vscsr_addr
   }.otherwise{
     addr := src2(11, 0)
   }
   val csri = ZeroExt(src2(16, 12), XLEN)
   val rdata = Wire(UInt(XLEN.W))
-  val wdata = LookupTree(func, List(
+  val rdata_tmp = Wire(UInt(XLEN.W))
+  val wdata_tmp = LookupTree(func, List(
     CSROpType.wrt  -> src1,
     CSROpType.set  -> (rdata | src1),
     CSROpType.clr  -> (rdata & (~src1).asUInt),
@@ -930,7 +945,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     CSROpType.seti -> (rdata | csri),
     CSROpType.clri -> (rdata & (~csri).asUInt)
   ))
-
+  val is_vsip_ie = addr === Vsip.U || addr === Vsie.U
+  val wdata = Mux(is_vsip_ie, ZeroExt(wdata_tmp << 1, XLEN), wdata_tmp)
   val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
     (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U) ||
     addr === Mip.U
@@ -951,11 +967,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val wen = valid && CSROpType.needAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
   val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
-  val csrAccess = csrAccessPermissionCheck(addr, false.B, priviledgeMode, virtMode, HasHExtension)
+  val HasH = (HasHExtension == true).asBool()
+  val csrAccess = csrAccessPermissionCheck(addr, false.B, priviledgeMode, virtMode, HasH)
   val modePermitted = csrAccess === 0.U && dcsrPermitted && triggerPermitted
   val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
   val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && Mux(virtMode, vaccessPermitted, accessPermitted)
-  MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
+  MaskedRegMap.generate(mapping, addr, rdata_tmp, wen && permitted, wdata)
+  rdata := Mux(is_vsip_ie, ZeroExt(rdata_tmp << 1, XLEN), rdata_tmp)
   io.out.bits.data := rdata
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.uop.cf := cfOut
@@ -1015,10 +1033,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // the WFI instruction causes an illegal instruction exception.
   // The time limit may always be 0, in which case WFI always causes
   // an illegal instruction exception in less-privileged modes when TW=1.
-  val illegalWFI = valid && isWFI && priviledgeMode < ModeM && mstatusStruct.tw === 1.U
-  val illegalVWFI = valid && isWFI &&
-    ((virtMode && priviledgeMode === ModeS && hstatusStruct.vtw === 1.U && mstatusStruct.tw === 0.U)||
-      (virtMode && priviledgeMode === ModeU && mstatus.tw === 1.U)))
+  val illegalWFI = valid && isWFI && (priviledgeMode < ModeM && mstatusStruct.tw === 1.U ||  priviledgeMode === ModeU && !virtMode)
+  val illegalVWFI = valid && isWFI && ((virtMode && priviledgeMode === ModeS && hstatusStruct.vtw === 1.U && mstatusStruct.tw === 0.U)||
+      (virtMode && priviledgeMode === ModeU && mstatusStruct.tw === 0.U))
   // Illegal priviledged instruction check
   val isIllegalAddr = valid && CSROpType.needAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
   val isIllegalAccess = !virtMode && wen && !(Mux(addrInPerfCnt, perfcntPermitted, csrAccess === 0.U && dcsrPermitted && triggerPermitted) && accessPermitted)
@@ -1029,10 +1046,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // expose several csr bits for tlb
   tlbBundle.priv.mxr   := mstatusStruct.mxr.asBool
   tlbBundle.priv.sum   := mstatusStruct.sum.asBool
-  tlbBundle.priv.vmxr := vsstatusStruct.vmxr.asBool
-  tlbBundle.priv.vsum := vsstatusStruct.vsum.asBool
+  tlbBundle.priv.vmxr := vsstatusStruct.mxr.asBool
+  tlbBundle.priv.vsum := vsstatusStruct.sum.asBool
   tlbBundle.priv.spvp := hstatusStruct.spvp
-  tlbBundle.priv.virt  := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpv && (mstatusStruct.mpp =/= ModeM), virtMode)
+  tlbBundle.priv.virt  := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpv & (mstatusStruct.mpp =/= ModeM), virtMode)
   tlbBundle.priv.imode := priviledgeMode
   tlbBundle.priv.dmode := Mux(debugMode && dcsr.asTypeOf(new DcsrStruct).mprven, ModeM, Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode))
 
@@ -1064,7 +1081,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.ie.m := mstatusOld.pie.m
     priviledgeMode := mstatusOld.mpp
-    when(HasHExtension) {
+    if(HasHExtension) {
       virtMode := mstatusOld.mpv
       mstatusNew.mpv := 0.U
     }
@@ -1076,7 +1093,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     retTarget := mepc(VAddrBits-1, 0)
   }
 
-  when (valid && isSret && !illegalSret && ! ) {
+  when (valid && isSret && !illegalSret && !illegalSModeSret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val hstatusOld = WireInit(hstatus.asTypeOf(new HstatusStruct))
@@ -1085,22 +1102,24 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val vsstatusNew = WireInit(vsstatus.asTypeOf(new MstatusStruct))
     when (virtMode === 0.U) {
       virtMode := hstatusOld.spv
-      hstatusOld.spv := 0.U
+      hstatusNew.spv := 0.U
       mstatusNew.ie.s := mstatusOld.pie.s
       priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
       mstatusNew.pie.s := true.B
       mstatusNew.spp := ModeU
-      mstatus := mstatusNew.asUInt
       when(mstatusOld.spp =/= ModeM) {
         mstatusNew.mprv := 0.U
       }
+      mstatus := mstatusNew.asUInt
+      hstatus := hstatusNew.asUInt
       // lr := false.B
       retTarget := sepc(VAddrBits - 1, 0)
     }.otherwise{
       priviledgeMode := vsstatusOld.spp
-      vsstatusNew.spp = ModeU
+      vsstatusNew.spp := ModeU
       vsstatusNew.ie.s := vsstatusOld.pie.s
       vsstatusNew.pie.s := 1.U
+      vsstatus := vsstatusNew.asUInt
       retTarget := vsepc(VAddrBits - 1, 0)
     }
   }
@@ -1124,8 +1143,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val csrExceptionVec = WireInit(cfIn.exceptionVec)
   csrExceptionVec(breakPoint) := io.in.valid && isEbreak && (ebreakCauseException || debugMode)
   csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
-  csrExceptionVec(ecallH) := priviledgeMode === ModeH && io.in.valid && isEcall
-  csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
+  csrExceptionVec(ecallVS) := priviledgeMode === ModeS && virtMode && io.in.valid && isEcall
+  csrExceptionVec(ecallS) := priviledgeMode === ModeS && !virtMode && io.in.valid && isEcall
   csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
   // Trigger an illegal instr exception when:
   // * unimplemented csr is being read/written
@@ -1142,7 +1161,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val idelegS =  (mideleg & mip.asUInt)
   val idelegVS = (hideleg & mideleg & mip.asUInt)
   def priviledgedEnableDetect(idelegS: Bool, idelegVS: Bool): Bool = Mux(idelegS,
-    Mux(idelegVS, (virtMode && priviledgeMode === ModeS && vsstatusStruct.ie.s) || (virtMode, priviledgeMode < ModeS),
+    Mux(idelegVS, (virtMode && priviledgeMode === ModeS && vsstatusStruct.ie.s) || (virtMode && priviledgeMode < ModeS),
       ((priviledgeMode === ModeS) && mstatusStruct.ie.s) || (priviledgeMode < ModeS) || virtMode),
     ((priviledgeMode === ModeM) && mstatusStruct.ie.m) || (priviledgeMode < ModeM))
 
@@ -1235,7 +1254,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     hasLoadGuestPageFault,
     hasStoreGuestPageFault
   )).asUInt.orR
-  val updateTval_h = VecInst(Seq(
+  val updateTval_h = VecInit(Seq(
     hasInstGuestPageFault,
     hasLoadGuestPageFault,
     hasStoreGuestPageFault
@@ -1276,7 +1295,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hdeleg = Mux(raiseIntr, hideleg, hedeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(7,0)) && (priviledgeMode < ModeM)
-  val delegVS = virtmode && delegS && hdeleg(causeNO(7, 0)) && (priviledgeMode < ModeM)
+  val delegVS = virtMode && delegS && hdeleg(causeNO(7, 0)) && (priviledgeMode < ModeM)
   val clearTval = !updateTval || raiseIntr
   val clearTval_h = !updateTval_h || raiseIntr
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
@@ -1348,13 +1367,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       virtMode := true.B
       priviledgeMode := ModeS
     }.elsewhen (delegS) {
-      val virt := Mux(mstatusOld.mprv, mstatusOld.mpv, virtMode)
+      val virt = Mux(mstatusOld.mprv.asBool(), mstatusOld.mpv, virtMode)
       // to do hld st
       hstatusNew.gva := (hasInstGuestPageFault || hasLoadGuestPageFault || hasStoreGuestPageFault ||
-                      ((virt )&& ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
+                      (virt.asBool() && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
                       || hasInstrPageFault || hasLoadPageFault || hasStorePageFault)))
       hstatusNew.spv := virtMode
-      if(virtMode){
+      when(virtMode){
         hstatusNew.spvp := priviledgeMode
       }
       virtMode := false.B
@@ -1367,12 +1386,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       when (clearTval) { stval := 0.U }
       when (clearTval_h) {htval := 0.U}
     }.otherwise {
-      val virt := Mux(mstatusOld.mprv, mstatusOld.mpv, virtMode)
+      val virt = Mux(mstatusOld.mprv.asBool(), mstatusOld.mpv, virtMode)
       // to do hld st
       mstatusNew.gva := (hasInstGuestPageFault || hasLoadGuestPageFault || hasStoreGuestPageFault ||
-      ((virt) && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
+      (virt.asBool() && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
         || hasInstrPageFault || hasLoadPageFault || hasStorePageFault)))
-      mstatusNew.spv := virtMode
+      mstatusNew.mpv := virtMode
       virtMode := false.B
       mcause := causeNO
       mepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
@@ -1455,39 +1474,47 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.clock := clock
     difftest.io.coreid := csrio.hartId
     difftest.io.priviledgeMode := priviledgeMode
-    difftest.io.virtMode := virtMode
     difftest.io.mstatus := mstatus
     difftest.io.sstatus := mstatus & sstatusRmask
-    difftest.io.hstatus := hstatus
-    difftest.io.vsstatus := vsstatus
     difftest.io.mepc := mepc
     difftest.io.sepc := sepc
-    difftest.io.vsepc := vsepc
     difftest.io.mtval:= mtval
     difftest.io.stval:= stval
-    difftest.io.htval := htval
-    difftest.io.vstval := vstval
     difftest.io.mtvec := mtvec
     difftest.io.stvec := stvec
-    difftest.io.vstvec := vstvec
     difftest.io.mcause := mcause
     difftest.io.scause := scause
     difftest.io.satp := satp
-    difftest.io.vsatp := vsatp
-    difftest.io.hgatp := hgatp
     difftest.io.mip := mipReg
     difftest.io.mie := mie
     difftest.io.mscratch := mscratch
     difftest.io.sscratch := sscratch
-    difftest.io.vsscratch := vsscratch
     difftest.io.mideleg := mideleg
-    difftest.io.hideleg := hideleg
     difftest.io.medeleg := medeleg
+  }
+  if (env.AlwaysBasicDiff || env.EnableDifftest) {
+    val difftest = Module(new DifftestHCSRState)
+    difftest.io.clock := clock
+    difftest.io.coreid := csrio.hartId
+    difftest.io.virtMode := virtMode
+    difftest.io.mtval2 := mtval2
+    difftest.io.mtinst := mtinst
+    difftest.io.hstatus := hstatus
+    difftest.io.hideleg := hideleg
     difftest.io.hedeleg := hedeleg
     difftest.io.hcounteren := hcounteren
-    difftest.io.mtinst := mtinst
+    difftest.io.htval := htval
     difftest.io.htinst := htinst
+    difftest.io.hgatp := hgatp
+    difftest.io.vsstatus := vsstatus
+    difftest.io.vstvec := vstvec
+    difftest.io.vsepc := vsepc
+    difftest.io.vscause := vscause
+    difftest.io.vstval := vstval
+    difftest.io.vsatp := vsatp
+    difftest.io.vsscratch := vsscratch
   }
+
 
   if(env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = Module(new DifftestDebugMode)

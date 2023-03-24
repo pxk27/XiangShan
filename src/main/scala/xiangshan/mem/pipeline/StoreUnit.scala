@@ -47,7 +47,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
     Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src(0)(VAddrBits-1, 12)),
   )
   val saddr = Cat(saddr_hi, saddr_lo(11,0))
-  val isHsv = WireInit(LSUOpType.isHsv(s0_uop.ctrl.fuOpType))
+  val isHsv = WireInit(LSUOpType.isHsv(io.in.bits.uop.ctrl.fuOpType))
 
   io.dtlbReq.bits.vaddr := saddr
   io.dtlbReq.valid := io.in.valid

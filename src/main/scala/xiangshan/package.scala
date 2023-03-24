@@ -670,7 +670,7 @@ package object xiangshan {
     numFpSrc = 0,
     writeIntRf = true,
     writeFpRf = false,
-    exceptionOut = Seq(illegalInstr, breakPoint, ecallU, ecallS, ecallM),
+    exceptionOut = Seq(illegalInstr, virtualInstr, breakPoint, ecallU, ecallS, ecallVS, ecallM),
     flushPipe = true
   )
 
