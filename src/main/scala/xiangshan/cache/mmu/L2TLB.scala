@@ -292,7 +292,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val mem_resp_from_ptw = from_ptw(mem.d.bits.source)
   val mem_resp_from_hptw = from_hptw(mem.d.bits.source)
   when (mem.d.valid) {
-    assert(mem.d.bits.source <= l2tlbParams.llptwsize.U)
+    assert(mem.d.bits.source <= (l2tlbParams.llptwsize + 1).U)
     refill_data(refill_helper._4) := mem.d.bits.data
   }
   // refill_data_tmp is the wire fork of refill_data, but one cycle earlier
@@ -302,8 +302,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // save only one pte for each id
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
   val resp_pte = VecInit((0 until MemReqWidth).map(i =>
-    if (i == FsmReqID) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), mem_resp_done && !mem_resp_from_llptw && !mem_resp_from_hptw) }
-    else if( i == HptwReqID) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), mem_resp_done && !mem_resp_from_llptw && mem_resp_from_ptw)}
+    if (i == FsmReqID) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), mem_resp_done && !mem_resp_from_llptw && !mem_resp_from_hptw && mem_resp_from_ptw) }
+    else if( i == HptwReqID) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), mem_resp_done && !mem_resp_from_llptw && !mem_resp_from_ptw && mem_resp_from_hptw)}
     else { DataHoldBypass(get_part(refill_data, req_addr_low(i)), llptw_mem.buffer_it(i)) }
     // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
   ))
@@ -359,7 +359,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
       difftest.io.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.af
       difftest.io.index := i.U
-      difftest.io.satp := io.csr.tlb.satp.ppn
+      difftest.io.satp := Cat(io.csr.tlb.satp.mode, io.csr.tlb.satp.asid, io.csr.tlb.satp.ppn)
       difftest.io.vsatp := Cat(io.csr.tlb.vsatp.mode, io.csr.tlb.vsatp.asid, io.csr.tlb.vsatp.ppn)
       difftest.io.hgatp := Cat(io.csr.tlb.hgatp.mode, io.csr.tlb.hgatp.asid, io.csr.tlb.hgatp.ppn)
       difftest.io.s2xlate := io.tlb(i).resp.bits.entry.s2xlate

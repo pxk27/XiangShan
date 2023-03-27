@@ -81,7 +81,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
     else (satp.mode === 8.U) && (mode < ModeM)
   val s2xlateEnable_tmp = (0 until Width).map(i => (isHyperInst(i) || virt) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode < ModeM))
-  val s2xlateEnable = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill && s2xlateEnable_tmp(i), resp(i).fire, flush_pipe(i)))
+  val s2xlateEnable = (0 until Width).map(i => ValidHold(req(i).fire && !req(i).bits.kill && s2xlateEnable_tmp(i), resp(i).fire, flush_pipe(i)))
   val portTranslateEnable = (0 until Width).map(i => (vmEnable || s2xlateEnable(i)) && !req(i).bits.no_translate)
 
   val req_in = req
@@ -372,7 +372,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       difftest.io.valid := l1tlbid =/= 3.U && RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && portTranslateEnable(i)
       difftest.io.index := i.U
       difftest.io.l1tlbid := l1tlbid
-      difftest.io.satp := io.csr.satp.ppn
+      difftest.io.satp := Cat(io.csr.satp.mode, io.csr.satp.asid, io.csr.satp.ppn)
       difftest.io.vsatp := Cat(io.csr.vsatp.mode, io.csr.vsatp.asid, io.csr.vsatp.ppn)
       difftest.io.hgatp := Cat(io.csr.hgatp.mode, io.csr.hgatp.asid, io.csr.hgatp.ppn)
       difftest.io.s2xlate := RegNext(req_in(i).bits.hlvx || req_in(i).bits.hyperinst)

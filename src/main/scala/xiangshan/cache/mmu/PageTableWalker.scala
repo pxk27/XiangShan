@@ -86,7 +86,6 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val level = RegInit(0.U(log2Up(Level).W))
   val gpaddr = Reg(UInt(XLEN.W))
-  val hpaddr = Reg(UInt(XLEN.W))
   val vpn = gpaddr(40, 12)
   val levelNext = level + 1.U
   val Pg_base = MakeGAddr(hgatp.ppn, getGVpnn(vpn, 2.U))
@@ -400,11 +399,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_mem_req := true.B
     w_mem_resp := true.B
     s_llptw_req := true.B
-    mem_addr_update := true.B
     s_hptw_req := true.B
     w_hptw_resp := true.B
     s_last_hptw_req := true.B
     w_last_hptw_resp := true.B
+    mem_addr_update := true.B
+    last_s2xlate := false.B
   }
 
   when (mem.req.fire()){
