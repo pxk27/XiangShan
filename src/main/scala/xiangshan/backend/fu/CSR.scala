@@ -648,6 +648,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hgeip = RegInit(UInt(XLEN.W), 0.U)
   val henvcfg = RegInit(UInt(XLEN.W), 0.U)
   val hgatp = RegInit(UInt(XLEN.W), 0.U)
+  val hgatpMask = Cat("h8".U(Hgatp_Mode_len.W), satp_part_wmask(Hgatp_Vmid_len, VmidLength), satp_part_wmask(Hgatp_Addr_len, PAddrBits-12))
   val htimedelta = RegInit(UInt(XLEN.W), 0.U)
   val hcounteren = RegInit(UInt(XLEN.W), 0.U)
 
@@ -875,7 +876,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Vscause, vscause),
     MaskedRegMap(Vstval, vstval),
     MaskedRegMap(Vsip, mipReg.asUInt, vsip_ie_Mask, (_ << 1), vsip_ie_Mask, (_ >> 1)),
-    MaskedRegMap(Vsatp, vsatp),
+    MaskedRegMap(Vsatp, vsatp, satpMask, MaskedRegMap.NoSideEffect, satpMask),
 
     //--- Machine Registers ---
     MaskedRegMap(Mtval2, mtval2),

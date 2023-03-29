@@ -47,6 +47,7 @@ class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
     }))
     val resp = Valid(new Bundle {
       val resp = Output(UInt(XLEN.W))
+      val level = Output(UInt(log2Up(Level).W))
       val af = Output(Bool())
       val pf = Output(Bool())
     })
@@ -119,6 +120,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.ptw.resp.valid := fromptw && resp_valid
   io.llptw.resp.valid := !fromptw && resp_valid
   io.ptw.resp.bits.resp := io.mem.resp.bits
+  io.ptw.resp.bits.level := level
   io.ptw.resp.bits.af := accessFault || ppn_af
   io.ptw.resp.bits.pf := pageFault && !accessFault && !ppn_af
   io.llptw.resp.bits.hpaddr := Cat(io.mem.resp.bits.asTypeOf(new PteBundle().cloneType).ppn, gpaddr(offLen - 1, 0))
@@ -138,6 +140,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   when (idle){
     when (io.ptw.req.fire()){
+      level := 0.U
       fromptw := true.B
       idle := false.B
       gpaddr := io.ptw.req.bits.gpaddr
@@ -145,6 +148,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
       s_pmp_check := false.B
       id := io.ptw.req.bits.id
     }.elsewhen(io.llptw.req.fire()){
+      level := 0.U
       fromptw := false.B
       idle := false.B
       gpaddr := io.llptw.req.bits.gpaddr
@@ -223,6 +227,7 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
       })
     val resp = Flipped(Valid(new Bundle {
       val resp = Output(UInt(XLEN.W))
+      val level = Output(UInt(log2Up(Level).W))
       val af = Output(Bool())
       val pf = Output(Bool())
     }))
@@ -270,6 +275,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val l1Hit = Reg(Bool())
   val Pte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
   val hptw_Pte = io.hptw.resp.bits.resp.asTypeOf(new PteBundle().cloneType)
+  val hptw_level = io.hptw.resp.bits.level
 
   // s/w register
   val s_pmp_check = RegInit(true.B)
@@ -303,7 +309,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
 
   val gpaddr = mem_addr
-  val hpaddr = Cat(hptw_Pte.ppn, gpaddr(offLen - 1, 0))
+  val hpaddr = MakeHPaddr(hptw_Pte.ppn, hptw_level, gpaddr);
 
   io.req.ready := idle
 

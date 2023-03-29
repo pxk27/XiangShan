@@ -84,6 +84,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
   })
   val refill = Flipped(ValidIO(new Bundle {
     val ptes = UInt(blockBits.W)
+    val hyper = Bool()
     val levelOH = new Bundle {
       // NOTE: levelOH has (Level+1) bits, each stands for page cache entries
       val sp = Bool()

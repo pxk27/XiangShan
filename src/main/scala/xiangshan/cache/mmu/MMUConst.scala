@@ -239,6 +239,14 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
     (Cat(ppn, 0.U(offLen.W)) + Cat(off, 0.U(log2Up(XLEN / 8).W)))(GPAddrBits - 1, 0)
   }
 
+  def MakeHPaddr(ppn:UInt, level: UInt, gpaddr:UInt) = {
+    val pg_mask0 = ((1 << 30) - 1).U(XLEN.W)
+    val pg_mask1 = ((1 << 21) - 1).U(XLEN.W)
+    val pg_base = Cat(ppn, 0.U(offLen.W))
+    Mux(level === 0.U, (pg_base & ~pg_mask0) | (gpaddr & pg_mask0) ,
+      Mux(level === 1.U, (pg_base & ~pg_mask0) | (gpaddr & pg_mask0),
+        Cat(ppn, gpaddr(offLen - 1, 0))))
+  }
   def getVpnn(vpn: UInt, idx: Int): UInt = {
     vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
   }
