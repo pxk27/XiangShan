@@ -316,20 +316,21 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_ptw
   ptw.io.mem.resp.bits := resp_pte.take(l2tlbParams.llptwsize + 1).last
   // mem -> cache
-  val refill_from_mq = mem_resp_from_llptw
-  val refill_level = Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, init = 0.U, ptw.io.mem.req.fire()))
-  val refill_valid = !(ptw.io.refill.req_info.hyperinst || ptw.io.refill.req_info.virt) && mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
+  val refill_from_llptw = mem_resp_from_llptw
+  val refill_level = Mux(refill_from_llptw, 2.U, RegEnable(ptw.io.refill.level, init = 0.U, ptw.io.mem.req.fire()))
+  val refill_valid = mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
 
   cache.io.refill.valid := RegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
-  cache.io.refill.bits.req_info_dup.map(_ := RegEnable(Mux(refill_from_mq, llptw_mem.refill, ptw.io.refill.req_info), refill_valid))
+  cache.io.refill.bits.req_info_dup.map(_ := RegEnable(Mux(refill_from_llptw, llptw_mem.refill, ptw.io.refill.req_info), refill_valid))
   cache.io.refill.bits.level_dup.map(_ := RegEnable(refill_level, refill_valid))
   cache.io.refill.bits.levelOH(refill_level, refill_valid)
   cache.io.refill.bits.sel_pte_dup.map(_ := RegNext(sel_data(refill_data_tmp.asUInt, req_addr_low(mem.d.bits.source))))
 
-  // hptw, hptw <> ptw, hptw <> llptw, hptw <> mem
+  // hptw, hptw <> ptw, hptw <> llptw, hptw <> mem, hptw <> pageCache
   hptw.io.ptw <> ptw.io.hptw
   hptw.io.llptw <> llptw.io.hptw
+  hptw.io.pageCache <> cache.io.hptw
   hptw.io.mem.req.ready := mem.a.ready
   hptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_hptw
   hptw.io.mem.resp.bits := resp_pte.take(l2tlbParams.llptwsize + 2).last

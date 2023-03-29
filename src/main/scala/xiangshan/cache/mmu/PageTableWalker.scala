@@ -66,6 +66,19 @@ class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
       val pf = Output(Bool())
     })
   }
+  val pageCache = new Bundle {
+    val req = Flipped(DecoupledIO(new Bundle {
+      val gpaddr = UInt(XLEN.W)
+      val sfence = new SfenceBundle
+      val hgatp = new TlbSatpBundle
+    }))
+    val resp = Valid(new Bundle {
+      val resp = Output(UInt(XLEN.W))
+      val level = Output(UInt(log2Up(Level).W))
+      val af = Output(Bool())
+      val pf = Output(Bool())
+    })
+  }
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
     val resp = Flipped(ValidIO(UInt(XLEN.W)))
@@ -81,8 +94,9 @@ class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
 class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new HPTWIO)
   val fromptw = RegInit(false.B)
-  val hgatp = Mux(fromptw, io.ptw.req.bits.hgatp, io.llptw.req.bits.hgatp)
-  val sfence = Mux(fromptw, io.ptw.req.bits.sfence, io.llptw.req.bits.sfence)
+  val frompageCache = RegInit(false.B)
+  val hgatp = Mux(frompageCache, io.pageCache.req.bits.hgatp, Mux(fromptw, io.ptw.req.bits.hgatp, io.llptw.req.bits.hgatp))
+  val sfence = Mux(frompageCache, io.pageCache.req.bits.sfence, Mux(fromptw, io.ptw.req.bits.sfence, io.llptw.req.bits.sfence))
   val flush = sfence.valid || hgatp.changed
 
   val level = RegInit(0.U(log2Up(Level).W))
@@ -117,12 +131,19 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.ptw.req.ready := idle
   io.llptw.req.ready := idle
 
+  io.pageCache.resp.valid := frompageCache && resp_valid
   io.ptw.resp.valid := fromptw && resp_valid
-  io.llptw.resp.valid := !fromptw && resp_valid
+  io.llptw.resp.valid := !fromptw && !frompageCache && resp_valid
+  io.pageCache.resp.bits.resp := io.mem.resp.bits
+  io.pageCache.resp.bits.level := level
+  io.pageCache.resp.bits.af := accessFault || ppn_af
+  io.pageCache.resp.bits.pf := pageFault && !accessFault && !ppn_af
+
   io.ptw.resp.bits.resp := io.mem.resp.bits
   io.ptw.resp.bits.level := level
   io.ptw.resp.bits.af := accessFault || ppn_af
   io.ptw.resp.bits.pf := pageFault && !accessFault && !ppn_af
+
   io.llptw.resp.bits.hpaddr := Cat(io.mem.resp.bits.asTypeOf(new PteBundle().cloneType).ppn, gpaddr(offLen - 1, 0))
   io.llptw.resp.bits.af := accessFault || ppn_af
   io.llptw.resp.bits.pf := pageFault && !accessFault && !ppn_af
@@ -137,10 +158,18 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.mem.req.bits.addr := mem_addr
   io.mem.req.bits.id := HptwReqID.U(bMemID.W)
 
-
   when (idle){
-    when (io.ptw.req.fire()){
+    when(io.pageCache.req.fire()){
       level := 0.U
+      frompageCache := true.B
+      fromptw := false.B
+      idle := false.B
+      gpaddr := io.ptw.req.bits.gpaddr
+      accessFault := false.B
+      s_pmp_check := false.B
+    }.elsewhen (io.ptw.req.fire()){
+      level := 0.U
+      frompageCache := false.B
       fromptw := true.B
       idle := false.B
       gpaddr := io.ptw.req.bits.gpaddr
@@ -150,6 +179,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     }.elsewhen(io.llptw.req.fire()){
       level := 0.U
       fromptw := false.B
+      frompageCache := false.B
       idle := false.B
       gpaddr := io.llptw.req.bits.gpaddr
       accessFault := false.B

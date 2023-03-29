@@ -105,6 +105,19 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
   }))
   val sfence_dup = Vec(4, Input(new SfenceBundle()))
   val csr_dup = Vec(3, Input(new TlbCsrBundle()))
+  val hptw = new Bundle {
+    val req = DecoupledIO(new Bundle {
+      val gpaddr = UInt(XLEN.W)
+      val sfence = new SfenceBundle
+      val hgatp = new TlbSatpBundle
+    })
+    val resp = Flipped(Valid(new Bundle {
+      val resp = Output(UInt(XLEN.W))
+      val level = Output(UInt(log2Up(Level).W))
+      val af = Output(Bool())
+      val pf = Output(Bool())
+    }))
+  }
 }
 
 @chiselName
@@ -227,12 +240,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   // if the req is hypervisor inst or in virtMode, we don't used ptw cache
-  val hyper = stageReq.bits.req_info.virt || stageReq.bits.req_info.hyperinst
+  val s2xlate = stageReq.bits.req_info.virt || stageReq.bits.req_info.hyperinst
 
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN, l1Pre) = {
-    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid) && l1v(i) && !hyper }
+    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, Mux(s2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid), s2xlate) && l1v(i) }
     val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
 
     // stageDelay, but check for l1
@@ -271,7 +284,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val data_resp = DataHoldBypass(l2.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).map { case (wayData, v) =>
-      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid) && v && !hyper })
+      wayData.entries.hit(delay_vpn, Mux(s2xlate, io.csr_dup(1).vsatp.asid, io.csr_dup(1).satp.asid), s2xlate) && v })
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
@@ -316,7 +329,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val data_resp = DataHoldBypass(l3.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).map { case (wayData, v) =>
-      wayData.entries.hit(delay_vpn, io.csr_dup(2).satp.asid) && v  && !hyper })
+      wayData.entries.hit(delay_vpn, Mux(s2xlate, io.csr_dup(2).vsatp.asid, io.csr_dup(2).satp.asid), s2xlate) && v})
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
@@ -354,8 +367,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   // super page
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
   val (spHit, spHitData, spPre, spValid) = {
-    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, io.csr_dup(0).satp.asid) && spv(i) }
-    val hitVec = hitVecT.map(x => RegEnable(x && !hyper, stageReq.fire))
+    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(stageReq.bits.req_info.vpn, Mux(s2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid), s2xlate) && spv(i) }
+    val hitVec = hitVecT.map(x => RegEnable(x, stageReq.fire))
     val hitData = ParallelPriorityMux(hitVec zip sp)
     val hit = ParallelOR(hitVec)
 
@@ -449,7 +462,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       io.csr_dup(0).satp.asid,
       memSelData(0),
       0.U,
-      refill_prefetch_dup(0)
+      refill_prefetch_dup(0),
+      s2xlate = refill.req_info_dup(0).hyperinst || refill.req_info_dup(0).virt,
     )
     ptwl1replace.access(refillIdx)
     l1v := l1v | rfOH
@@ -477,7 +491,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       asid = io.csr_dup(1).satp.asid,
       data = memRdata,
       levelUInt = 1.U,
-      refill_prefetch_dup(1)
+      refill_prefetch_dup(1),
+      s2xlate = refill.req_info_dup(1).hyperinst || refill.req_info_dup(1).virt
     )
     l2.io.w.apply(
       valid = true.B,
@@ -515,7 +530,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       asid = io.csr_dup(2).satp.asid,
       data = memRdata,
       levelUInt = 2.U,
-      refill_prefetch_dup(2)
+      refill_prefetch_dup(2),
+      s2xlate = refill.req_info_dup(2).hyperinst || refill.req_info_dup(2).virt
     )
     l3.io.w.apply(
       valid = true.B,
@@ -554,6 +570,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       refill.level_dup(2),
       refill_prefetch_dup(0),
       !memPte(0).isPf(refill.level_dup(0)),
+      s2xlate = refill.req_info_dup(0).virt || refill.req_info_dup(0).hyperinst
     )
     spreplace.access(refillIdx)
     spv := spv | rfOH

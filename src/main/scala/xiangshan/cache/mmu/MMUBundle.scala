@@ -620,24 +620,25 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     )
   }
 
-  def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false) = {
+  def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool) = {
     require(vpn.getWidth == vpnLen)
 //    require(this.asid.getWidth <= asid.getWidth)
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
+    val s2xlate_hit = this.s2xlate === s2xlate
     if (allType) {
       require(hasLevel)
       val hit0 = tag(tagLen - 1,    vpnnLen*2) === vpn(tagLen - 1, vpnnLen*2)
       val hit1 = tag(vpnnLen*2 - 1, vpnnLen)   === vpn(vpnnLen*2 - 1,  vpnnLen)
       val hit2 = tag(vpnnLen - 1,     0)         === vpn(vpnnLen - 1, 0)
 
-      asid_hit && Mux(level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0))
+      s2xlate_hit && asid_hit && Mux(level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0))
     } else if (hasLevel) {
       val hit0 = tag(tagLen - 1, tagLen - vpnnLen) === vpn(vpnLen - 1, vpnLen - vpnnLen)
       val hit1 = tag(tagLen - vpnnLen - 1, tagLen - vpnnLen * 2) === vpn(vpnLen - vpnnLen - 1, vpnLen - vpnnLen * 2)
 
-      asid_hit && Mux(level.getOrElse(0.U) === 0.U, hit0, hit0 && hit1)
+      s2xlate_hit && asid_hit && Mux(level.getOrElse(0.U) === 0.U, hit0, hit0 && hit1)
     } else {
-      asid_hit && tag === vpn(vpnLen - 1, vpnLen - tagLen)
+      s2xlate_hit && asid_hit && tag === vpn(vpnLen - 1, vpnLen - tagLen)
     }
   }
 
@@ -683,6 +684,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   val vs   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
   val prefetch = Bool()
+  val s2xlate = Bool() // this entry is guest machine page
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
   // NOTE: vs is used for different usage:
   // for l3, which store the leaf(leaves), vs is page fault or not.
@@ -701,12 +703,13 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     getVpnClip(vpn, level)(log2Up(num) - 1, 0)
   }
 
-  def hit(vpn: UInt, asid: UInt, ignoreAsid: Boolean = false) = {
+  def hit(vpn: UInt, asid: UInt, ignoreAsid: Boolean = false, s2xlate: Bool) = {
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
-    asid_hit && tag === tagClip(vpn) && (if (hasPerm) true.B else vs(sectorIdxClip(vpn, level)))
+    val s2xlate_hit = this.s2xlate === s2xlate
+    s2xlate_hit && asid_hit && tag === tagClip(vpn) && (if (hasPerm) true.B else vs(sectorIdxClip(vpn, level)))
   }
 
-  def genEntries(vpn: UInt, asid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool) = {
+  def genEntries(vpn: UInt, asid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool, s2xlate: Bool) = {
     require((data.getWidth / XLEN) == num,
       s"input data length must be multiple of pte length: data.length:${data.getWidth} num:${num}")
 
@@ -714,6 +717,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     ps.tag := tagClip(vpn)
     ps.asid := asid
     ps.prefetch := prefetch
+    ps.s2xlate := s2xlate
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
       ps.ppns(i) := pte.ppn
@@ -778,8 +782,8 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
     Cat(res).orR
   }
 
-  def gen(vpn: UInt, asid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool) = {
-    this.entries := entries.genEntries(vpn, asid, data, levelUInt, prefetch)
+  def gen(vpn: UInt, asid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool, s2xlate: Bool) = {
+    this.entries := entries.genEntries(vpn, asid, data, levelUInt, prefetch, s2xlate)
     this.encode()
   }
 }
