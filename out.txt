@@ -1,0 +1,82 @@
+Emu compiled at Mar 30 2023, 00:35:34
+Using simulated 32768B flash
+[warning]no valid flash bin path, use preset flash instead
+The image is ../riscv-hyp-tests/build/nemu/rvh_test.bin
+Using simulated 8192MB RAM
+NemuProxy using ../NEMU/build/riscv64-nemu-interpreter-so
+[FORK_INFO pid(2338688)] enable fork debugging...
+[NEMU] Can not find flash image: (null)
+[NEMU] Use built-in image instead
+[1;34m[src/device/io/mmio.c:38,add_mmio_map] Add mmio map 'flash' at [0x0000000010000000, 0x00000000100fffff][0m
+The first instruction of core 0 has commited. Difftest enabled. 
+risc-v hypervisor extension tests
+[34mcheck_misa_h                                                          [0m
+[34m	check h bit after setting it                                          [0m[32mPASSED[0m
+DEBUG: goto_priv: real = m, target = m, curr = m
+DEBUG: goto_priv: real = m, target = m, curr = m
+DEBUG: goto_priv: real = m, target = m, curr = m
+[34mhfence_test                                                           [0m
+DEBUG: goto_priv: real = m, target = hs, curr = m
+VERBOSE: entering hs mode...
+VERBOSE: ...entered hs mode
+DEBUG: g page hpt_root: 80018000, max hpt_root: 8001bff8 hpt: 80010000
+DEBUG: vs page: 8001c000
+
+[FORK_INFO pid(2341498)] the oldest checkpoint start to dump wave and dump nemu log...
+[FORK_INFO pid(2341498)] dump wave to /nfs/home/peixiaokun/OpenXiangShan/XiangShan/build/2023-03-30@01:00:18_150086.vcd...
+gpaddr: 8001c020
+i = 0,hpaddr: 80018010
+i = 1,hpaddr: 80010000
+s1 paddr:8001c020
+gpaddr: 8001e000
+i = 0,hpaddr: 80018010
+i = 1,hpaddr: 80010000
+s1 paddr:8001e000
+gpaddr: 8001f360
+i = 0,hpaddr: 80018010
+i = 1,hpaddr: 80010000
+s1 paddr:8001f360
+gpaddr: 10006c000
+i = 0,hpaddr: 80018020
+i = 1,hpaddr: 80011000
+i = 2,hpaddr: 80012360
+L2TLB resp test of core 0 index 1 failed! vpn = 10006c
+  satp: 0
+  s2xlate: 1; satp: mode 0, ppn : 0; vsatp: mode 8, ppn : 8001c; hgatp: mode 8, ppn : 80018
+  REF commits ppn 0x8806c, perm 0x67, level 2, pf 0
+  DUT commits ppn 0x88000, perm 0x6f, level 2, pf 0
+*************** CHECHPOINT INFO START (PID 2341498) ***************
+Core 0: [31mABORT at pc = 0x80004ab0
+[0m[35mtotal guest instructions = 108,378
+[0m[35minstrCnt = 108,378, cycleCnt = 153,377, IPC = 0.706612
+[0m[34mSeed=0 Guest cycle spent: 153,380 (this will be different from cycleCnt if emu loads a snapshot)
+[0m[34mHost time spent: 179,131ms
+[0mgpaddr: 8001c020
+i = 0,hpaddr: 80018010
+i = 1,hpaddr: 80010000
+s1 paddr:8001c020
+gpaddr: 8001e000
+i = 0,hpaddr: 80018010
+i = 1,hpaddr: 80010000
+s1 paddr:8001e000
+gpaddr: 8001f360
+i = 0,hpaddr: 80018010
+i = 1,hpaddr: 80010000
+s1 paddr:8001f360
+gpaddr: 10006c000
+i = 0,hpaddr: 80018020
+i = 1,hpaddr: 80011000
+i = 2,hpaddr: 80012360
+L2TLB resp test of core 0 index 1 failed! vpn = 10006c
+  satp: 0
+  s2xlate: 1; satp: mode 0, ppn : 0; vsatp: mode 8, ppn : 8001c; hgatp: mode 8, ppn : 80018
+  REF commits ppn 0x8806c, perm 0x67, level 2, pf 0
+  DUT commits ppn 0x88000, perm 0x6f, level 2, pf 0
+*************** MAIN INFO START (PID 2338688) ***************
+[FORK_INFO pid(2338688)] clear processes...
+Core 0: [31mABORT at pc = 0x80004ab0
+[0m[35mtotal guest instructions = 108,378
+[0m[35minstrCnt = 108,378, cycleCnt = 153,377, IPC = 0.706612
+[0m[34mSeed=0 Guest cycle spent: 153,380 (this will be different from cycleCnt if emu loads a snapshot)
+[0m[34mHost time spent: 179,159ms
+[0m

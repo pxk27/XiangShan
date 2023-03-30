@@ -93,10 +93,8 @@ class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
 @chiselName
 class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new HPTWIO)
-  val fromptw = RegInit(false.B)
-  val frompageCache = RegInit(false.B)
-  val hgatp = Mux(frompageCache, io.pageCache.req.bits.hgatp, Mux(fromptw, io.ptw.req.bits.hgatp, io.llptw.req.bits.hgatp))
-  val sfence = Mux(frompageCache, io.pageCache.req.bits.sfence, Mux(fromptw, io.ptw.req.bits.sfence, io.llptw.req.bits.sfence))
+  val hgatp =  io.ptw.req.bits.hgatp
+  val sfence = io.ptw.req.bits.sfence
   val flush = sfence.valid || hgatp.changed
 
   val level = RegInit(0.U(log2Up(Level).W))
@@ -131,23 +129,14 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.ptw.req.ready := idle
   io.llptw.req.ready := idle
 
-  io.pageCache.resp.valid := frompageCache && resp_valid
-  io.ptw.resp.valid := fromptw && resp_valid
-  io.llptw.resp.valid := !fromptw && !frompageCache && resp_valid
-  io.pageCache.resp.bits.resp := io.mem.resp.bits
-  io.pageCache.resp.bits.level := level
-  io.pageCache.resp.bits.af := accessFault || ppn_af
-  io.pageCache.resp.bits.pf := pageFault && !accessFault && !ppn_af
-
+  io.ptw.resp.valid := resp_valid
   io.ptw.resp.bits.resp := io.mem.resp.bits
   io.ptw.resp.bits.level := level
   io.ptw.resp.bits.af := accessFault || ppn_af
   io.ptw.resp.bits.pf := pageFault && !accessFault && !ppn_af
 
-  io.llptw.resp.bits.hpaddr := Cat(io.mem.resp.bits.asTypeOf(new PteBundle().cloneType).ppn, gpaddr(offLen - 1, 0))
-  io.llptw.resp.bits.af := accessFault || ppn_af
-  io.llptw.resp.bits.pf := pageFault && !accessFault && !ppn_af
-  io.llptw.resp.bits.id := id
+  io.pageCache := DontCare
+  io.llptw := DontCare
 
   io.pmp.req.valid := DontCare
   io.pmp.req.bits.addr := mem_addr
@@ -161,16 +150,12 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   when (idle){
     when(io.pageCache.req.fire()){
       level := 0.U
-      frompageCache := true.B
-      fromptw := false.B
       idle := false.B
       gpaddr := io.ptw.req.bits.gpaddr
       accessFault := false.B
       s_pmp_check := false.B
     }.elsewhen (io.ptw.req.fire()){
       level := 0.U
-      frompageCache := false.B
-      fromptw := true.B
       idle := false.B
       gpaddr := io.ptw.req.bits.gpaddr
       accessFault := false.B
@@ -178,8 +163,6 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
       id := io.ptw.req.bits.id
     }.elsewhen(io.llptw.req.fire()){
       level := 0.U
-      fromptw := false.B
-      frompageCache := false.B
       idle := false.B
       gpaddr := io.llptw.req.bits.gpaddr
       accessFault := false.B
@@ -216,7 +199,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
       s_mem_req := false.B
       mem_addr_update := false.B
     }.elsewhen(resp_valid){
-      when(io.ptw.resp.fire() || io.llptw.resp.fire()){
+      when(io.ptw.resp.fire()){
         idle := true.B
         mem_addr_update := false.B
         accessFault := false.B
@@ -226,6 +209,143 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 
 }
+
+//@chiselName
+//class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
+//  val io = IO(new HPTWIO)
+//  val fromptw = RegInit(false.B)
+//  val frompageCache = RegInit(false.B)
+//  val hgatp = Mux(frompageCache, io.pageCache.req.bits.hgatp, Mux(fromptw, io.ptw.req.bits.hgatp, io.llptw.req.bits.hgatp))
+//  val sfence = Mux(frompageCache, io.pageCache.req.bits.sfence, Mux(fromptw, io.ptw.req.bits.sfence, io.llptw.req.bits.sfence))
+//  val flush = sfence.valid || hgatp.changed
+//
+//  val level = RegInit(0.U(log2Up(Level).W))
+//  val gpaddr = Reg(UInt(XLEN.W))
+//  val vpn = gpaddr(40, 12)
+//  val levelNext = level + 1.U
+//  val Pg_base = MakeGAddr(hgatp.ppn, getGVpnn(vpn, 2.U))
+//  val Pte = io.mem.resp.bits.asTypeOf(new PteBundle().cloneType)
+//  val p_Pte = MakeAddr(Pte.ppn, getVpnn(vpn, 2.U - level))
+//  val mem_addr = Mux(level === 0.U, Pg_base, p_Pte)
+//
+//  // s/w register
+//  val s_pmp_check = RegInit(true.B)
+//  val s_mem_req = RegInit(true.B)
+//  val w_mem_resp = RegInit(true.B)
+//  val mem_addr_update = RegInit(false.B)
+//  val idle = RegInit(true.B)
+//  val finish = WireInit(false.B)
+//  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish
+//
+//  val pageFault = Pte.isPf(level)
+//  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
+//
+//  val ppn_af = Pte.isAf()
+//  val find_pte = Pte.isLeaf() || ppn_af || pageFault
+//
+//
+//  val resp_valid = idle === false.B && mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault))
+//
+//
+//  val id = Reg(UInt(log2Up(l2tlbParams.llptwsize).W))
+//  io.ptw.req.ready := idle
+//  io.llptw.req.ready := idle
+//
+//  io.pageCache.resp.valid := frompageCache && resp_valid
+//  io.ptw.resp.valid := fromptw && resp_valid
+//  io.llptw.resp.valid := !fromptw && !frompageCache && resp_valid
+//  io.pageCache.resp.bits.resp := io.mem.resp.bits
+//  io.pageCache.resp.bits.level := level
+//  io.pageCache.resp.bits.af := accessFault || ppn_af
+//  io.pageCache.resp.bits.pf := pageFault && !accessFault && !ppn_af
+//
+//  io.ptw.resp.bits.resp := io.mem.resp.bits
+//  io.ptw.resp.bits.level := level
+//  io.ptw.resp.bits.af := accessFault || ppn_af
+//  io.ptw.resp.bits.pf := pageFault && !accessFault && !ppn_af
+//
+//  io.llptw.resp.bits.hpaddr := Cat(io.mem.resp.bits.asTypeOf(new PteBundle().cloneType).ppn, gpaddr(offLen - 1, 0))
+//  io.llptw.resp.bits.af := accessFault || ppn_af
+//  io.llptw.resp.bits.pf := pageFault && !accessFault && !ppn_af
+//  io.llptw.resp.bits.id := id
+//
+//  io.pmp.req.valid := DontCare
+//  io.pmp.req.bits.addr := mem_addr
+//  io.pmp.req.bits.size := 3.U
+//  io.pmp.req.bits.cmd := TlbCmd.read
+//
+//  io.mem.req.valid := s_mem_req === false.B && !io.mem.mask && !accessFault && s_pmp_check
+//  io.mem.req.bits.addr := mem_addr
+//  io.mem.req.bits.id := HptwReqID.U(bMemID.W)
+//
+//  when (idle){
+//    when(io.pageCache.req.fire()){
+//      level := 0.U
+//      frompageCache := true.B
+//      fromptw := false.B
+//      idle := false.B
+//      gpaddr := io.ptw.req.bits.gpaddr
+//      accessFault := false.B
+//      s_pmp_check := false.B
+//    }.elsewhen (io.ptw.req.fire()){
+//      level := 0.U
+//      frompageCache := false.B
+//      fromptw := true.B
+//      idle := false.B
+//      gpaddr := io.ptw.req.bits.gpaddr
+//      accessFault := false.B
+//      s_pmp_check := false.B
+//      id := io.ptw.req.bits.id
+//    }.elsewhen(io.llptw.req.fire()){
+//      level := 0.U
+//      fromptw := false.B
+//      frompageCache := false.B
+//      idle := false.B
+//      gpaddr := io.llptw.req.bits.gpaddr
+//      accessFault := false.B
+//      s_pmp_check := false.B
+//      id := io.llptw.req.bits.id
+//    }
+//  }
+//
+//  when(sent_to_pmp && mem_addr_update === false.B){
+//    s_mem_req := false.B
+//    s_pmp_check := true.B
+//  }
+//
+//  when(accessFault && idle === false.B){
+//    s_pmp_check := true.B
+//    s_mem_req := true.B
+//    w_mem_resp := true.B
+//    mem_addr_update := true.B
+//  }
+//
+//  when(io.mem.req.fire()){
+//    s_mem_req := true.B
+//    w_mem_resp := false.B
+//  }
+//
+//  when(io.mem.resp.fire() && w_mem_resp === false.B){
+//    w_mem_resp := true.B
+//    mem_addr_update := true.B
+//  }
+//
+//  when(mem_addr_update){
+//    when(!(find_pte || accessFault)){
+//      level := levelNext
+//      s_mem_req := false.B
+//      mem_addr_update := false.B
+//    }.elsewhen(resp_valid){
+//      when(io.ptw.resp.fire() || io.llptw.resp.fire()){
+//        idle := true.B
+//        mem_addr_update := false.B
+//        accessFault := false.B
+//      }
+//      finish := true.B
+//    }
+//  }
+//
+//}
 
 
 /** PTW : page table walker
@@ -302,7 +422,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val gvpn = Reg(UInt(gvpnLen.W)) // for the cases: 1. satp == 0 and hgatp != 0 and exec hlv; 2. virtmode == 1, vsatp == 0 and hgatp != 0
 
   val levelNext = level + 1.U
-  val l1Hit = Reg(Bool())
   val Pte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
   val hptw_Pte = io.hptw.resp.bits.resp.asTypeOf(new PteBundle().cloneType)
   val hptw_level = io.hptw.resp.bits.level
@@ -310,7 +429,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   // s/w register
   val s_pmp_check = RegInit(true.B)
   val s_mem_req = RegInit(true.B)
-  val s_llptw_req = RegInit(true.B)
   val w_mem_resp = RegInit(true.B)
   val s_hptw_req = RegInit(true.B)
   val w_hptw_resp = RegInit(true.B)
@@ -331,15 +449,15 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val ppn_af = Mux(s2xlate, false.B, Pte.isAf())
   val find_pte = Pte.isLeaf() || ppn_af || pageFault || hptw_pageFault || onlyS2xlate
-  val to_find_pte = level === 1.U && find_pte === false.B
+
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
   val vaddr = Cat(gvpn, 0.U(offLen.W))
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
-  val l2addr = MakeAddr(Mux(l1Hit, ppn, Pte.ppn), getVpnn(vpn, 1))
+  val l2addr = MakeAddr(Pte.ppn, getVpnn(vpn, 1))
   val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
 
   val gpaddr = mem_addr
-  val hpaddr = MakeHPaddr(hptw_Pte.ppn, hptw_level, gpaddr);
+  val hpaddr = MakeHPaddr(hptw_Pte.ppn, hptw_level, gpaddr)
 
   io.req.ready := idle
 
@@ -347,14 +465,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.resp.bits.source := source
   io.resp.bits.resp.apply(pageFault && !accessFault && !ppn_af, hptw_accessFault || accessFault || ppn_af, hptw_pageFault, Mux(accessFault, af_level,level), Mux(s2xlate, hptw_Pte, Pte), vpn, satp.asid, gpaddr >> 12.U, hgatp.asid, s2xlate)
 
-  io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault
-  io.llptw.bits.req_info.source := source
-  io.llptw.bits.req_info.vpn := vpn
-  io.llptw.bits.req_info.gvpn := gvpn
-  io.llptw.bits.ppn := Pte.ppn
-  io.llptw.bits.req_info.hlvx := hlvx
-  io.llptw.bits.req_info.hyperinst := hyperInst
-  io.llptw.bits.req_info.virt := virt
 
   io.pmp.req.valid := DontCare // samecycle, do not use valid
   io.pmp.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
@@ -365,28 +475,24 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
   mem.req.bits.id := FsmReqID.U(bMemID.W)
 
-  io.refill.req_info.virt := virt
-  io.refill.req_info.hyperinst := hyperInst
-  io.refill.req_info.hlvx := hlvx
-  io.refill.req_info.vpn := vpn
-  io.refill.req_info.gvpn := gvpn
-  io.refill.level := level
-  io.refill.req_info.source := source
+  io.llptw := DontCare
+  io.refill := DontCare
+
 
   io.hptw.req.valid := s_hptw_req === false.B || s_last_hptw_req === false.B
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
   io.hptw.req.bits.gpaddr := gpaddr
   io.hptw.req.bits.sfence := io.sfence
   io.hptw.req.bits.hgatp := io.csr.hgatp
+
   when (io.req.fire()){
-    level := Mux(io.req.bits.l1Hit, 1.U, 0.U)
-    af_level := Mux(io.req.bits.l1Hit, 1.U, 0.U)
-    ppn := Mux(io.req.bits.l1Hit, io.req.bits.ppn, satp.ppn)
+    level := 0.U
+    af_level := 0.U
+    ppn := satp.ppn
     vpn := io.req.bits.req_info.vpn
     gvpn := io.req.bits.req_info.gvpn
     hyperInst := io.req.bits.req_info.hyperinst
     hlvx := io.req.bits.req_info.hlvx
-    l1Hit := io.req.bits.l1Hit
     accessFault := false.B
     idle := false.B
     when((io.req.bits.req_info.hyperinst || virt) && hgatp.mode =/= 0.U ){
@@ -434,7 +540,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_pmp_check := true.B
     s_mem_req := true.B
     w_mem_resp := true.B
-    s_llptw_req := true.B
     s_hptw_req := true.B
     w_hptw_resp := true.B
     s_last_hptw_req := true.B
@@ -451,27 +556,18 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when(mem.resp.fire() && w_mem_resp === false.B){
     w_mem_resp := true.B
     af_level := af_level + 1.U
-    s_llptw_req := false.B
     mem_addr_update := true.B
   }
 
   when(mem_addr_update){
-    when(level === 0.U && !(find_pte || accessFault)){
+    when(!(find_pte || accessFault)){
       level := levelNext
       when (s2xlate){
         s_hptw_req := false.B
       }.otherwise{
         s_mem_req := false.B
       }
-      s_llptw_req := true.B
       mem_addr_update := false.B
-    }.elsewhen(io.llptw.valid){
-      when(io.llptw.fire()) {
-        idle := true.B
-        s_llptw_req := true.B
-        mem_addr_update := false.B
-      }
-      finish := true.B
     }.elsewhen(find_pte){
       when(s2xlate && last_s2xlate === true.B){
         s_last_hptw_req := false.B
@@ -479,7 +575,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       }.elsewhen(io.resp.valid){
         when(io.resp.fire()) {
           idle := true.B
-          s_llptw_req := true.B
           mem_addr_update := false.B
           accessFault := false.B
         }
@@ -488,12 +583,10 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     }
   }
 
-
   when (sfence.valid) {
     idle := true.B
     s_pmp_check := true.B
     s_mem_req := true.B
-    s_llptw_req := true.B
     w_mem_resp := true.B
     accessFault := false.B
     mem_addr_update := false.B
@@ -502,36 +595,287 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_last_hptw_req := true.B
     w_last_hptw_resp := true.B
   }
-
-
   XSDebug(p"[ptw] level:${level} notFound:${pageFault}\n")
 
-  // perf
-  XSPerfAccumulate("fsm_count", io.req.fire())
-  for (i <- 0 until PtwWidth) {
-    XSPerfAccumulate(s"fsm_count_source${i}", io.req.fire() && io.req.bits.req_info.source === i.U)
-  }
-  XSPerfAccumulate("fsm_busy", !idle)
-  XSPerfAccumulate("fsm_idle", idle)
-  XSPerfAccumulate("resp_blocked", io.resp.valid && !io.resp.ready)
-  XSPerfAccumulate("ptw_ppn_af", io.resp.fire && ppn_af)
-  XSPerfAccumulate("mem_count", mem.req.fire())
-  XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
-  XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
+    // perf
+    XSPerfAccumulate("fsm_count", io.req.fire())
+    for (i <- 0 until PtwWidth) {
+      XSPerfAccumulate(s"fsm_count_source${i}", io.req.fire() && io.req.bits.req_info.source === i.U)
+    }
+    XSPerfAccumulate("fsm_busy", !idle)
+    XSPerfAccumulate("fsm_idle", idle)
+    XSPerfAccumulate("resp_blocked", io.resp.valid && !io.resp.ready)
+    XSPerfAccumulate("ptw_ppn_af", io.resp.fire && ppn_af)
+    XSPerfAccumulate("mem_count", mem.req.fire())
+    XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
+    XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
 
-  TimeOutAssert(!idle, timeOutThreshold, "page table walker time out")
+    TimeOutAssert(!idle, timeOutThreshold, "page table walker time out")
 
-  val perfEvents = Seq(
-    ("fsm_count         ", io.req.fire()                                     ),
-    ("fsm_busy          ", !idle                                             ),
-    ("fsm_idle          ", idle                                              ),
-    ("resp_blocked      ", io.resp.valid && !io.resp.ready                   ),
-    ("mem_count         ", mem.req.fire()                                    ),
-    ("mem_cycle         ", BoolStopWatch(mem.req.fire, mem.resp.fire(), true)),
-    ("mem_blocked       ", mem.req.valid && !mem.req.ready                   ),
-  )
-  generatePerfEvent()
+    val perfEvents = Seq(
+      ("fsm_count         ", io.req.fire()                                     ),
+      ("fsm_busy          ", !idle                                             ),
+      ("fsm_idle          ", idle                                              ),
+      ("resp_blocked      ", io.resp.valid && !io.resp.ready                   ),
+      ("mem_count         ", mem.req.fire()                                    ),
+      ("mem_cycle         ", BoolStopWatch(mem.req.fire, mem.resp.fire(), true)),
+      ("mem_blocked       ", mem.req.valid && !mem.req.ready                   ),
+    )
+    generatePerfEvent()
 }
+
+//@chiselName
+//class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
+//  val io = IO(new PTWIO)
+//  val sfence = io.sfence
+//  val mem = io.mem
+//  val virt = io.csr.priv.virt
+//  val hyperInst = RegInit(false.B)
+//  val hlvx = RegInit(false.B)
+//  val satp = Mux((virt || hyperInst), io.csr.vsatp, io.csr.satp)
+//  val hgatp = io.csr.hgatp
+//  val onlyS1xlate = satp.mode =/= 0.U && hgatp.mode === 0.U
+//  val onlyS2xlate = satp.mode === 0.U && hgatp.mode =/= 0.U
+//  val s2xlate = (virt || hyperInst) && !onlyS1xlate
+//  val flush = io.sfence.valid || satp.changed
+//
+//  val level = RegInit(0.U(log2Up(Level).W))
+//  val af_level = RegInit(0.U(log2Up(Level).W)) // access fault return this level
+//  val ppn = Reg(UInt(ppnLen.W))
+//  val vpn = Reg(UInt(vpnLen.W))
+//  val gvpn = Reg(UInt(gvpnLen.W)) // for the cases: 1. satp == 0 and hgatp != 0 and exec hlv; 2. virtmode == 1, vsatp == 0 and hgatp != 0
+//
+//  val levelNext = level + 1.U
+//  val l1Hit = Reg(Bool())
+//  val Pte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
+//  val hptw_Pte = io.hptw.resp.bits.resp.asTypeOf(new PteBundle().cloneType)
+//  val hptw_level = io.hptw.resp.bits.level
+//
+//  // s/w register
+//  val s_pmp_check = RegInit(true.B)
+//  val s_mem_req = RegInit(true.B)
+//  val s_llptw_req = RegInit(true.B)
+//  val w_mem_resp = RegInit(true.B)
+//  val s_hptw_req = RegInit(true.B)
+//  val w_hptw_resp = RegInit(true.B)
+//  val s_last_hptw_req = RegInit(true.B)
+//  val w_last_hptw_resp = RegInit(true.B)
+//  // for updating "level"
+//  val mem_addr_update = RegInit(false.B)
+//  val idle = RegInit(true.B)
+//  val finish = WireInit(false.B)
+//  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish
+//
+//  val pageFault = Pte.isPf(level)
+//  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
+//
+//  val hptw_pageFault = RegInit(false.B)
+//  val hptw_accessFault = RegInit(false.B)
+//  val last_s2xlate = RegInit(false.B) //we need to return host pte other than guest pte
+//
+//  val ppn_af = Mux(s2xlate, false.B, Pte.isAf())
+//  val find_pte = Pte.isLeaf() || ppn_af || pageFault || hptw_pageFault || onlyS2xlate
+//  val to_find_pte = level === 1.U && find_pte === false.B
+//  val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
+//  val vaddr = Cat(gvpn, 0.U(offLen.W))
+//  val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
+//  val l2addr = MakeAddr(Mux(l1Hit, ppn, Pte.ppn), getVpnn(vpn, 1))
+//  val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
+//
+//  val gpaddr = mem_addr
+//  val hpaddr = MakeHPaddr(hptw_Pte.ppn, hptw_level, gpaddr);
+//
+//  io.req.ready := idle
+//
+//  io.resp.valid := !idle && mem_addr_update && !last_s2xlate && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate)
+//  io.resp.bits.source := source
+//  io.resp.bits.resp.apply(pageFault && !accessFault && !ppn_af, hptw_accessFault || accessFault || ppn_af, hptw_pageFault, Mux(accessFault, af_level,level), Mux(s2xlate, hptw_Pte, Pte), vpn, satp.asid, gpaddr >> 12.U, hgatp.asid, s2xlate)
+//
+//  io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault
+//  io.llptw.bits.req_info.source := source
+//  io.llptw.bits.req_info.vpn := vpn
+//  io.llptw.bits.req_info.gvpn := gvpn
+//  io.llptw.bits.ppn := Pte.ppn
+//  io.llptw.bits.req_info.hlvx := hlvx
+//  io.llptw.bits.req_info.hyperinst := hyperInst
+//  io.llptw.bits.req_info.virt := virt
+//
+//  io.pmp.req.valid := DontCare // samecycle, do not use valid
+//  io.pmp.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
+//  io.pmp.req.bits.size := 3.U // TODO: fix it
+//  io.pmp.req.bits.cmd := TlbCmd.read
+//
+//  mem.req.valid := s_mem_req === false.B && !mem.mask && !accessFault && s_pmp_check
+//  mem.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
+//  mem.req.bits.id := FsmReqID.U(bMemID.W)
+//
+//  io.refill.req_info.virt := virt
+//  io.refill.req_info.hyperinst := hyperInst
+//  io.refill.req_info.hlvx := hlvx
+//  io.refill.req_info.vpn := vpn
+//  io.refill.req_info.gvpn := gvpn
+//  io.refill.level := level
+//  io.refill.req_info.source := source
+//
+//  io.hptw.req.valid := s_hptw_req === false.B || s_last_hptw_req === false.B
+//  io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
+//  io.hptw.req.bits.gpaddr := gpaddr
+//  io.hptw.req.bits.sfence := io.sfence
+//  io.hptw.req.bits.hgatp := io.csr.hgatp
+//  when (io.req.fire()){
+//    level := Mux(io.req.bits.l1Hit, 1.U, 0.U)
+//    af_level := Mux(io.req.bits.l1Hit, 1.U, 0.U)
+//    ppn := Mux(io.req.bits.l1Hit, io.req.bits.ppn, satp.ppn)
+//    vpn := io.req.bits.req_info.vpn
+//    gvpn := io.req.bits.req_info.gvpn
+//    hyperInst := io.req.bits.req_info.hyperinst
+//    hlvx := io.req.bits.req_info.hlvx
+//    l1Hit := io.req.bits.l1Hit
+//    accessFault := false.B
+//    idle := false.B
+//    when((io.req.bits.req_info.hyperinst || virt) && hgatp.mode =/= 0.U ){
+//      last_s2xlate := true.B
+//      s_hptw_req := false.B
+//    }.otherwise{
+//      s_pmp_check := false.B
+//    }
+//  }
+//
+//  when(io.hptw.req.fire() && s_hptw_req === false.B){
+//    s_hptw_req := true.B
+//    w_hptw_resp := false.B
+//  }
+//
+//  when(io.hptw.resp.fire() && w_hptw_resp === false.B){
+//    hptw_pageFault := io.hptw.resp.bits.pf
+//    hptw_accessFault := io.hptw.resp.bits.af
+//    w_hptw_resp := true.B
+//    when(onlyS2xlate){
+//      mem_addr_update := true.B
+//      last_s2xlate := false.B
+//    }.otherwise{
+//      s_pmp_check := false.B
+//    }
+//  }
+//
+//  when(io.hptw.req.fire() && s_last_hptw_req === false.B){
+//    w_last_hptw_resp := false.B
+//    s_last_hptw_req := true.B
+//  }
+//
+//  when(io.hptw.resp.fire() && w_last_hptw_resp === false.B){
+//    w_last_hptw_resp := true.B
+//    mem_addr_update := true.B
+//    last_s2xlate := false.B
+//  }
+//
+//  when(sent_to_pmp && mem_addr_update === false.B){
+//    s_mem_req := false.B
+//    s_pmp_check := true.B
+//  }
+//
+//  when(accessFault && idle === false.B){
+//    s_pmp_check := true.B
+//    s_mem_req := true.B
+//    w_mem_resp := true.B
+//    s_llptw_req := true.B
+//    s_hptw_req := true.B
+//    w_hptw_resp := true.B
+//    s_last_hptw_req := true.B
+//    w_last_hptw_resp := true.B
+//    mem_addr_update := true.B
+//    last_s2xlate := false.B
+//  }
+//
+//  when (mem.req.fire()){
+//    s_mem_req := true.B
+//    w_mem_resp := false.B
+//  }
+//
+//  when(mem.resp.fire() && w_mem_resp === false.B){
+//    w_mem_resp := true.B
+//    af_level := af_level + 1.U
+//    s_llptw_req := false.B
+//    mem_addr_update := true.B
+//  }
+//
+//  when(mem_addr_update){
+//    when(level === 0.U && !(find_pte || accessFault)){
+//      level := levelNext
+//      when (s2xlate){
+//        s_hptw_req := false.B
+//      }.otherwise{
+//        s_mem_req := false.B
+//      }
+//      s_llptw_req := true.B
+//      mem_addr_update := false.B
+//    }.elsewhen(io.llptw.valid){
+//      when(io.llptw.fire()) {
+//        idle := true.B
+//        s_llptw_req := true.B
+//        mem_addr_update := false.B
+//      }
+//      finish := true.B
+//    }.elsewhen(find_pte){
+//      when(s2xlate && last_s2xlate === true.B){
+//        s_last_hptw_req := false.B
+//        mem_addr_update := false.B
+//      }.elsewhen(io.resp.valid){
+//        when(io.resp.fire()) {
+//          idle := true.B
+//          s_llptw_req := true.B
+//          mem_addr_update := false.B
+//          accessFault := false.B
+//        }
+//        finish := true.B
+//      }
+//    }
+//  }
+//
+//
+//  when (sfence.valid) {
+//    idle := true.B
+//    s_pmp_check := true.B
+//    s_mem_req := true.B
+//    s_llptw_req := true.B
+//    w_mem_resp := true.B
+//    accessFault := false.B
+//    mem_addr_update := false.B
+//    s_hptw_req := true.B
+//    w_hptw_resp := true.B
+//    s_last_hptw_req := true.B
+//    w_last_hptw_resp := true.B
+//  }
+//
+//
+//  XSDebug(p"[ptw] level:${level} notFound:${pageFault}\n")
+//
+//  // perf
+//  XSPerfAccumulate("fsm_count", io.req.fire())
+//  for (i <- 0 until PtwWidth) {
+//    XSPerfAccumulate(s"fsm_count_source${i}", io.req.fire() && io.req.bits.req_info.source === i.U)
+//  }
+//  XSPerfAccumulate("fsm_busy", !idle)
+//  XSPerfAccumulate("fsm_idle", idle)
+//  XSPerfAccumulate("resp_blocked", io.resp.valid && !io.resp.ready)
+//  XSPerfAccumulate("ptw_ppn_af", io.resp.fire && ppn_af)
+//  XSPerfAccumulate("mem_count", mem.req.fire())
+//  XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
+//  XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
+//
+//  TimeOutAssert(!idle, timeOutThreshold, "page table walker time out")
+//
+//  val perfEvents = Seq(
+//    ("fsm_count         ", io.req.fire()                                     ),
+//    ("fsm_busy          ", !idle                                             ),
+//    ("fsm_idle          ", idle                                              ),
+//    ("resp_blocked      ", io.resp.valid && !io.resp.ready                   ),
+//    ("mem_count         ", mem.req.fire()                                    ),
+//    ("mem_cycle         ", BoolStopWatch(mem.req.fire, mem.resp.fire(), true)),
+//    ("mem_blocked       ", mem.req.valid && !mem.req.ready                   ),
+//  )
+//  generatePerfEvent()
+//}
 
 /*========================= LLPTW ==============================*/
 
