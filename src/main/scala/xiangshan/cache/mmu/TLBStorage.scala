@@ -145,7 +145,7 @@ class TLBFA(
     entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)
   }
   // write assert, shoulg not duplicate with the existing entries
-  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.hit(io.w.bits.data.entry.tag, io.csr.satp.asid, io.w.bits.s2xlate, vmid = io.csr.hgatp.asid) && vi })
+  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.hit(io.w.bits.data.entry.tag, io.csr.satp.asid, io.w.bits.data.entry.s2xlate, vmid = io.csr.hgatp.asid) && vi })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegNext(io.w.bits.data.entry.tag)
@@ -595,16 +595,14 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     else io.w.valid && io.w.bits.data.entry.level.get === 2.U },
     wayIdx = normal_refill_idx,
     data = io.w.bits.data,
-    data_replenish = io.w.bits.data_replenish,
-    s2xlate = io.w.bits.s2xlate
+    data_replenish = io.w.bits.data_replenish
   )
   superPage.w_apply(
     valid = { if (q.normalAsVictim) io.w.valid
     else io.w.valid && io.w.bits.data.entry.level.get =/= 2.U },
     wayIdx = super_refill_idx,
     data = io.w.bits.data,
-    data_replenish = io.w.bits.data_replenish,
-    s2xlate = io.w.bits.s2xlate
+    data_replenish = io.w.bits.data_replenish
   )
 
     // replacement

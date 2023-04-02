@@ -503,6 +503,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   // load inst will be canceled immediately
   io.out.valid := io.in.valid && (!needLdVioCheckRedo && !s1_bank_conflict && !needReExecute || s1_is_sw_prefetch) && !io.s1_kill
   io.out.bits.paddr := s1_paddr_dup_lsu
+  io.out.bits.gpaddr := s1_gpaddr_dup_lsu
   io.out.bits.tlbMiss := s1_tlb_miss
 
   // current ori test will cause the case of ldest == 0, below will be modifeid in the future.

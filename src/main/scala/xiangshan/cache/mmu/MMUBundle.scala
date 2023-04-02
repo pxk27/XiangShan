@@ -273,7 +273,6 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     val wayIdx = Output(UInt(log2Up(nWays).W))
     val data = Output(new PtwResp)
     val data_replenish = Output(new PMPConfig)
-    val s2xlate = Output(Bool())
   }))
   val victim = new Bundle {
     val out = ValidIO(Output(new Bundle {
@@ -295,12 +294,11 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
-  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp, data_replenish: PMPConfig, s2xlate: Bool): Unit = {
+  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp, data_replenish: PMPConfig): Unit = {
     this.w.valid := valid
     this.w.bits.wayIdx := wayIdx
     this.w.bits.data := data
     this.w.bits.data_replenish := data_replenish
-    this.w.bits.s2xlate := s2xlate
   }
 
 }
@@ -324,7 +322,6 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
-    val s2xlate = Output(Bool())
     val data = Output(new PtwResp)
     val data_replenish = Output(new PMPConfig)
   }))
@@ -345,9 +342,8 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
     (this.r.resp(i).bits.gvpn, this.r.resp(i).bits.super_gvpn)
   }
 
-  def w_apply(valid: Bool, data: PtwResp, data_replenish: PMPConfig, s2xlate: Bool): Unit = {
+  def w_apply(valid: Bool, data: PtwResp, data_replenish: PMPConfig): Unit = {
     this.w.valid := valid
-    this.w.bits.s2xlate := s2xlate
     this.w.bits.data := data
     this.w.bits.data_replenish := data_replenish
   }
@@ -620,7 +616,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     )
   }
 
-  def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool = false.B) = {
+  def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool) = {
     require(vpn.getWidth == vpnLen)
 //    require(this.asid.getWidth <= asid.getWidth)
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)

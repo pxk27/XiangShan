@@ -75,10 +75,9 @@ class Fence(implicit p: Parameters) extends FunctionUnit {
 
   when (state === s_idle && io.in.valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }
-  when (state === s_wait && ((func === FenceOpType.sfence || func === FenceOpType.hfence_g || func === FenceOpType.hfence_v) && sbEmpty)
-    || (func === FenceOpType.sfence && disableSfence)
-    || (func === FenceOpType.hfence_g && disableHfenceg)
-    || (func === FenceOpType.hfence_v && disableHfencev)) { state := s_tlb }
+  when (state === s_wait && ((func === FenceOpType.sfence && (sbEmpty || disableSfence))
+    || (func === FenceOpType.hfence_g && (sbEmpty || disableHfenceg))
+    || (func === FenceOpType.hfence_v && (sbEmpty || disableHfencev)))) { state := s_tlb }
   when (state === s_wait && func === FenceOpType.fence  && sbEmpty) { state := s_fence }
   when (state === s_wait && func === FenceOpType.nofence  && sbEmpty) { state := s_nofence }
   when (state =/= s_idle && state =/= s_wait) { state := s_idle }

@@ -23,7 +23,7 @@ import freechips.rocketchip.rocket.Instructions
 import freechips.rocketchip.util.uintToBitPat
 import utils._
 import utility._
-import xiangshan.ExceptionNO.illegalInstr
+import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
 import xiangshan._
 import freechips.rocketchip.rocket.Instructions._
 
@@ -451,8 +451,8 @@ object HypervisorDecode extends DecodeConstants {
     HLV_HU      -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvhu,  Y, N, N, N, N, N, SelImm.X),
     HLV_W       -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvw,  Y, N, N, N, N, N, SelImm.X),
     HLV_WU      -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvwu,  Y, N, N, N, N, N, SelImm.X),
-    HLVX_HU     -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvhu,  Y, N, N, N, N, N, SelImm.X),
-    HLVX_WU     -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvwu,  Y, N, N, N, N, N, SelImm.X),
+    HLVX_HU     -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvxhu,  Y, N, N, N, N, N, SelImm.X),
+    HLVX_WU     -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvxwu,  Y, N, N, N, N, N, SelImm.X),
     HSV_B       -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.hsvb,  N, N, N, N, N, N, SelImm.X),
     HSV_D       -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.hsvd,  N, N, N, N, N, N, SelImm.X),
     HSV_H       -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.hsvh,  N, N, N, N, N, N, SelImm.X),
@@ -631,8 +631,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
   cs.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U
 
-  // hlv hlvx
-  val isHlv = BitPat("b011000000000?????100?????1110011")
 
   // read src1~3 location
   cs.lsrc(0) := ctrl_flow.instr(RS1_MSB, RS1_LSB)
@@ -655,6 +653,19 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     val svinval_ii = sinval || w_inval || inval_ir || hinval_gvma || hinval_vvma
     cf_ctrl.cf.exceptionVec(illegalInstr) := base_ii || svinval_ii
     cs.flushPipe := false.B
+  }
+
+  when(io.csrCtrl.virtMode){
+    // vs/vu attempting to exec hyperinst will raise virtual instruction
+    cf_ctrl.cf.exceptionVec(virtualInstr) := ctrl_flow.instr === HLV_B || ctrl_flow.instr === HLV_BU ||
+      ctrl_flow.instr === HLV_H   || ctrl_flow.instr === HLV_HU ||
+      ctrl_flow.instr === HLVX_HU || ctrl_flow.instr === HLV_W  ||
+      ctrl_flow.instr === HLVX_WU || ctrl_flow.instr === HLV_WU ||
+      ctrl_flow.instr === HLV_D   || ctrl_flow.instr === HSV_B  ||
+      ctrl_flow.instr === HSV_H   || ctrl_flow.instr === HSV_W  ||
+      ctrl_flow.instr === HSV_D   || ctrl_flow.instr === HFENCE_VVMA ||
+      ctrl_flow.instr === HFENCE_GVMA || ctrl_flow.instr === HINVAL_GVMA ||
+      ctrl_flow.instr === HINVAL_VVMA
   }
 
   // fix frflags

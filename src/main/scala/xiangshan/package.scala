@@ -657,7 +657,7 @@ package object xiangshan {
     fuGen = fenceGen,
     fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fence,
     FuType.fence, 2, 0, writeIntRf = false, writeFpRf = false,
-    latency = UncertainLatency(), exceptionOut = Seq(illegalInstr), // TODO: need rewrite latency structure, not just this value,
+    latency = UncertainLatency(), exceptionOut = Seq(illegalInstr, virtualInstr), // TODO: need rewrite latency structure, not just this value,
     flushPipe = true
   )
 
@@ -769,7 +769,7 @@ package object xiangshan {
     (uop: MicroOp) => FuType.loadCanAccept(uop.ctrl.fuType),
     FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true,
     latency = UncertainLatency(),
-    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault),
     flushPipe = true,
     replayInst = true,
     hasLoadError = true
@@ -781,7 +781,7 @@ package object xiangshan {
     (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault)
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault)
   )
 
   val stdCfg = FuConfig(

@@ -60,6 +60,17 @@ trait HasLoadHelper { this: XSModule =>
       LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
       LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
+
+      // hypervisor
+      LSUOpType.hlvb  -> SignExt(rdata( 7, 0), XLEN),
+      LSUOpType.hlvh  -> SignExt(rdata(15, 0), XLEN),
+      LSUOpType.hlvw  -> SignExt(rdata(31, 0), XLEN),
+      LSUOpType.hlvd  -> SignExt(rdata(63, 0), XLEN),
+      LSUOpType.hlvbu -> ZeroExt(rdata( 7, 0), XLEN),
+      LSUOpType.hlvhu -> ZeroExt(rdata(15, 0), XLEN),
+      LSUOpType.hlvwu -> ZeroExt(rdata(31, 0), XLEN),
+      LSUOpType.hlvxhu-> ZeroExt(rdata(15, 0), XLEN),
+      LSUOpType.hlvxwu-> ZeroExt(rdata(31, 0), XLEN),
     ))
   }
 }
@@ -353,6 +364,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   (0 until LoadPipelineWidth).map(i => {
     // vaddrModule rport 0 and 1 is used by exception and mmio 
     vaddrModule.io.raddr(2 + i) := loadReplaySelGen(i)
+    gpaddrModule.io.raddr(2 + i) := loadReplaySelGen(i)
   })
 
   (0 until LoadPipelineWidth).map(i => {
@@ -380,7 +392,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     io.loadOut(i).bits := DontCare
     io.loadOut(i).bits.uop := uop(replayIdx)
-    io.loadOut(i).bits.vaddr := vaddrModule.io.rdata(LoadPipelineWidth + i)
+    io.loadOut(i).bits.vaddr  := vaddrModule.io.rdata(LoadPipelineWidth + i)
+    io.loadOut(i).bits.gpaddr := gpaddrModule.io.rdata(LoadPipelineWidth + i)
     io.loadOut(i).bits.mask := genWmask(vaddrModule.io.rdata(LoadPipelineWidth + i), uop(replayIdx).ctrl.fuOpType(1,0))
     io.loadOut(i).bits.isFirstIssue := false.B
     io.loadOut(i).bits.isLoadReplay := true.B
@@ -409,6 +422,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     dataModule.io.wb.wen(i) := false.B
     dataModule.io.paddr.wen(i) := false.B
     vaddrModule.io.wen(i) := false.B
+    gpaddrModule.io.wen(i) := false.B
     vaddrTriggerResultModule.io.wen(i) := false.B
     val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
 
@@ -1023,6 +1037,7 @@ def detectRollback(i: Int) = {
   io.exceptionAddr.gpaddr := gpaddrModule.io.rdata(0)
   // read vaddr for mmio, and only port {1} is used
   vaddrModule.io.raddr(1) := deqPtr
+  gpaddrModule.io.raddr(1) := deqPtr
 
   (0 until LoadPipelineWidth).map(i => {
     if(i == 0) {

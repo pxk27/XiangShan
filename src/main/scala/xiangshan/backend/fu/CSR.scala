@@ -394,8 +394,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
   val mip_mie_WMask_H = if(HasHExtension){((1 << 2) | (1 << 6) | (1 << 10) | (1 << 12)).U(XLEN.W)}else{0.U(XLEN.W)}
+  val vssip_Mask = (1 << 2).U(XLEN.W)
 
-  val mipWMask = mip_mie_WMask_H | ((1 << 9) | (1 << 5) | (1 << 1)).U(XLEN.W)
+  val mipWMask = vssip_Mask | ((1 << 9) | (1 << 5) | (1 << 1)).U(XLEN.W)
   val mieWMask = mip_mie_WMask_H | ((1 << 11) | (1 << 9) | (1 << 7) | (1 << 5) | (1 << 3) | (1 << 1)).U(XLEN.W)
 
   def getMisaMxl(mxl: BigInt): BigInt = mxl << (XLEN - 2)
@@ -657,6 +658,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   //vsie vsip
   val vsMask = ((1 << 10) | (1 << 6) | (1 << 2)).U(XLEN.W)
   val vsip_ie_Mask = ZeroExt((hideleg & mideleg & vsMask), XLEN)
+  val vsip_WMask = ZeroExt((hideleg & mideleg & vssip_Mask), XLEN)
   val vstvec = RegInit(UInt(XLEN.W), 0.U)
   val vsscratch = RegInit(UInt(XLEN.W), 0.U)
   val vsepc = RegInit(UInt(XLEN.W), 0.U)
@@ -813,7 +815,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Misa, misa, 0.U, MaskedRegMap.Unwritable), // now whole misa is unchangeable
     MaskedRegMap(Medeleg, medeleg, medelegWMask),
     MaskedRegMap(Mideleg, mideleg, midelegWMask, MaskedRegMap.NoSideEffect),
-    MaskedRegMap(Mie, mie),
+    MaskedRegMap(Mie, mie, mieWMask, MaskedRegMap.NoSideEffect),
     MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
     MaskedRegMap(Mcounteren, mcounteren),
 
@@ -822,7 +824,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mepc, mepc, mepcMask, MaskedRegMap.NoSideEffect, mepcMask),
     MaskedRegMap(Mcause, mcause),
     MaskedRegMap(Mtval, mtval),
-    MaskedRegMap(Mip, mipReg.asUInt, mipMask),
+    MaskedRegMap(Mip, mipReg.asUInt, mipWMask, MaskedRegMap.NoSideEffect, mipMask),
 
     //--- Trigger ---
     MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
@@ -875,7 +877,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Vsepc, vsepc),
     MaskedRegMap(Vscause, vscause),
     MaskedRegMap(Vstval, vstval),
-    MaskedRegMap(Vsip, mipReg.asUInt, vsip_ie_Mask, (_ << 1), vsip_ie_Mask, (_ >> 1)),
+    MaskedRegMap(Vsip, mipReg.asUInt, vsip_WMask, MaskedRegMap.NoSideEffect, vsip_ie_Mask),
     MaskedRegMap(Vsatp, vsatp, satpMask, MaskedRegMap.NoSideEffect, satpMask),
 
     //--- Machine Registers ---
@@ -974,7 +976,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
   val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && Mux(virtMode, vaccessPermitted, accessPermitted)
   MaskedRegMap.generate(mapping, addr, rdata_tmp, wen && permitted, wdata)
-  rdata := Mux(is_vsip_ie, ZeroExt(rdata_tmp << 1, XLEN), rdata_tmp)
+  rdata := Mux(is_vsip_ie, ZeroExt(rdata_tmp >> 1, XLEN), rdata_tmp)
   io.out.bits.data := rdata
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.uop.cf := cfOut
@@ -1055,12 +1057,26 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   tlbBundle.priv.dmode := Mux(debugMode && dcsr.asTypeOf(new DcsrStruct).mprven, ModeM, Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode))
 
   // Branch control
-  val retTarget = Wire(UInt(VAddrBits.W))
+  val retTarget = WireInit(0.U)
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall && !isEbreak)
 
-  retTarget := DontCare
-  // val illegalEret = TODO
+  private val illegalRetTarget = WireInit(false.B)
+  when(valid) {
+    when(isDret) {
+      retTarget := dpc(VAddrBits - 1, 0)
+    }.elsewhen(isMret && !illegalMret) {
+      retTarget := mepc(VAddrBits - 1, 0)
+    }.elsewhen(isSret && !illegalSret && !illegalSModeSret && !illegalVSModeSret) {
+      retTarget := Mux(virtMode, vsepc(VAddrBits - 1, 0), sepc(VAddrBits - 1, 0))
+    }.elsewhen(isUret) {
+      retTarget := uepc(VAddrBits - 1, 0)
+    }.otherwise {
+      illegalRetTarget := true.B
+    }
+  }.otherwise {
+    illegalRetTarget := true.B // when illegalRetTarget setted, retTarget should never be used
+  }
 
   when (valid && isDret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -1070,7 +1086,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     when (dcsr.asTypeOf(new DcsrStruct).prv =/= ModeM) {mstatusNew.mprv := 0.U} //If the new privilege mode is less privileged than M-mode, MPRV in mstatus is cleared.
     mstatus := mstatusNew.asUInt
     priviledgeMode := dcsrNew.prv
-    retTarget := dpc(VAddrBits-1, 0)
     debugModeNew := false.B
     debugIntrEnable := true.B
     debugMode := debugModeNew
@@ -1090,11 +1105,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     mstatusNew.mpp := ModeU
     when (mstatusOld.mpp =/= ModeM) { mstatusNew.mprv := 0.U }
     mstatus := mstatusNew.asUInt
-    // lr := false.B
-    retTarget := mepc(VAddrBits-1, 0)
   }
 
-  when (valid && isSret && !illegalSret && !illegalSModeSret) {
+  when (valid && isSret && !illegalSret && !illegalSModeSret && !illegalVSModeSret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val hstatusOld = WireInit(hstatus.asTypeOf(new HstatusStruct))
@@ -1113,15 +1126,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       }
       mstatus := mstatusNew.asUInt
       hstatus := hstatusNew.asUInt
-      // lr := false.B
-      retTarget := sepc(VAddrBits - 1, 0)
     }.otherwise{
       priviledgeMode := vsstatusOld.spp
       vsstatusNew.spp := ModeU
       vsstatusNew.ie.s := vsstatusOld.pie.s
       vsstatusNew.pie.s := 1.U
       vsstatus := vsstatusNew.asUInt
-      retTarget := vsepc(VAddrBits - 1, 0)
     }
   }
 
@@ -1133,7 +1143,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     priviledgeMode := ModeU
     mstatusNew.pie.u := true.B
     mstatus := mstatusNew.asUInt
-    retTarget := uepc(VAddrBits-1, 0)
   }
 
   io.in.ready := true.B
@@ -1309,22 +1318,25 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     isXRetFlag := true.B
   }
   csrio.isXRet := isXRetFlag
-  val retTargetReg = RegEnable(retTarget, isXRet)
+  private val retTargetReg = RegEnable(retTarget, isXRet && !illegalRetTarget)
+  private val illegalXret = RegEnable(illegalMret || illegalSret || illegalSModeSret || illegalVSModeSret, isXRet)
+  val xtvec = Mux(delegS, Mux(delegVS, vstvec, stvec), mtvec)
+  val xtvecBase = xtvec(VAddrBits - 1, 2)
+  // When MODE=Vectored, all synchronous exceptions into M/S mode
+  // cause the pc to be set to the address in the BASE field, whereas
+  // interrupts cause the pc to be set to the address in the BASE field
+  // plus four times the interrupt cause number.
+  private val pcFromXtvec = Cat(xtvecBase + Mux(xtvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
 
-  val tvec = Mux(delegS, Mux(delegVS, vstvec, stvec), mtvec)
-  val tvecBase = tvec(VAddrBits - 1, 2)
   // XRet sends redirect instead of Flush and isXRetFlag is true.B before redirect.valid.
   // ROB sends exception at T0 while CSR receives at T2.
   // We add a RegNext here and trapTarget is valid at T3.
-  csrio.trapTarget := RegEnable(Mux(isXRetFlag,
-    retTargetReg,
-    Mux(raiseDebugExceptionIntr || ebreakEnterParkLoop, debugTrapTarget,
-      // When MODE=Vectored, all synchronous exceptions into M/S mode
-      // cause the pc to be set to the address in the BASE field, whereas
-      // interrupts cause the pc to be set to the address in the BASE field
-      // plus four times the interrupt cause number.
-      Cat(tvecBase + Mux(tvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
-  )), isXRetFlag || csrio.exception.valid)
+  csrio.trapTarget := RegEnable(
+    MuxCase(pcFromXtvec, Seq(
+      (isXRetFlag && !illegalXret) -> retTargetReg,
+      (raiseDebugExceptionIntr || ebreakEnterParkLoop) -> debugTrapTarget
+    )),
+    isXRetFlag || csrio.exception.valid)
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
