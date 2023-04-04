@@ -84,6 +84,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.req.bits.req_info.hyperinst := arb1.io.out.bits.hyperinst
   ptw.io.req.bits.req_info.virt := arb1.io.out.bits.virt
   ptw.io.req.bits.req_info.hlvx := arb1.io.out.bits.hlvx
+  ptw.io.req.bits.req_info.cmd := arb1.io.out.bits.cmd
   ptw.io.req.bits.l1Hit := false.B
   ptw.io.llptw.ready := DontCare
   ptw.io.sfence := sfence_dup(7)
@@ -204,6 +205,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       difftest.io.vsatp := Cat(io.csr.tlb.vsatp.mode, io.csr.tlb.vsatp.asid, io.csr.tlb.vsatp.ppn)
       difftest.io.hgatp := Cat(io.csr.tlb.hgatp.mode, io.csr.tlb.hgatp.asid, io.csr.tlb.hgatp.ppn)
       difftest.io.s2xlate := io.tlb(i).resp.bits.entry.s2xlate
+      difftest.io.hlvx := ptw.io.resp.bits.hlvx
       difftest.io.vpn := io.tlb(i).resp.bits.entry.tag
       difftest.io.ppn := io.tlb(i).resp.bits.entry.ppn
       difftest.io.perm := io.tlb(i).resp.bits.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt

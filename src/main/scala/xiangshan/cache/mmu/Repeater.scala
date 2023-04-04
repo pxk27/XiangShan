@@ -158,6 +158,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val ports = Reg(Vec(Size, Vec(Width, Bool()))) // record which port(s) the entry come from, may not able to cover all the ports
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
   val gvpn = Reg(Vec(Size, UInt(gvpnLen.W)))
+  val cmd = Reg(Vec(Size, TlbCmd()))
   val hyperinst = Reg(Vec(Size, Bool()))
   val hlvx = Reg(Vec(Size, Bool()))
   val virt = Reg(Vec(Size, Bool()))
@@ -262,6 +263,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.ptw.req(0).bits.virt := virt(issPtr)
   io.ptw.req(0).bits.hlvx := hlvx(issPtr)
   io.ptw.req(0).bits.hyperinst := hyperinst(issPtr)
+  io.ptw.req(0).bits.cmd := cmd(issPtr)
   io.ptw.resp.ready := true.B
 
   reqs.zipWithIndex.map{
@@ -272,6 +274,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
         gvpn(enqPtrVec(i)) := req.bits.gvpn
         hlvx(enqPtrVec(i)) := req.bits.hlvx
         hyperinst(enqPtrVec(i)) := req.bits.hyperinst
+        cmd(enqPtrVec(i)) := req.bits.cmd
         virt(enqPtrVec(i)) := req.bits.virt
         memidx(enqPtrVec(i)) := req.bits.memidx
         ports(enqPtrVec(i)) := req_ports(i).asBools

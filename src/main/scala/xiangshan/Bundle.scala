@@ -193,6 +193,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   def isSoftPrefetch: Bool = {
     fuType === FuType.alu && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
+  def isHyperInst: Bool = fuType === FuType.ldu && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu && LSUOpType.isHsv(fuOpType)
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {
