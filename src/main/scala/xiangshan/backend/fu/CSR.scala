@@ -1309,7 +1309,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val clearTval = !updateTval || raiseIntr
   val clearTval_h = !updateTval_h || raiseIntr
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
-
+  val isHyperInst = csrio.exception.bits.uop.ctrl.isHyperInst
   // ctrl block will use theses later for flush
   val isXRetFlag = RegInit(false.B)
   when (DelayN(io.redirectIn.valid, 5)) {
@@ -1383,7 +1383,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       val virt = Mux(mstatusOld.mprv.asBool(), mstatusOld.mpv, virtMode)
       // to do hld st
       hstatusNew.gva := (hasInstGuestPageFault || hasLoadGuestPageFault || hasStoreGuestPageFault ||
-                      (virt.asBool() && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
+                      ((virt.asBool() || isHyperInst) && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
                       || hasInstrPageFault || hasLoadPageFault || hasStorePageFault)))
       hstatusNew.spv := virtMode
       when(virtMode){
@@ -1402,7 +1402,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       val virt = Mux(mstatusOld.mprv.asBool(), mstatusOld.mpv, virtMode)
       // to do hld st
       mstatusNew.gva := (hasInstGuestPageFault || hasLoadGuestPageFault || hasStoreGuestPageFault ||
-      (virt.asBool() && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
+      ((virt.asBool() || isHyperInst) && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
         || hasInstrPageFault || hasLoadPageFault || hasStorePageFault)))
       mstatusNew.mpv := virtMode
       virtMode := false.B

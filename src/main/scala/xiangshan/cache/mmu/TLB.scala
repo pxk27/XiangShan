@@ -64,38 +64,38 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val satp = DelayN(io.csr.satp, q.fenceDelay)
   val vsatp = DelayN(io.csr.vsatp, q.fenceDelay)
   val hgatp = DelayN(io.csr.hgatp, q.fenceDelay)
-  val isHyperInst = (0 until Width).map(i => (req(i).bits.hyperinst))
+  val flush_pipe = io.flushPipe
+  val isHyperInst = (0 until Width).map(i =>ValidHold(req(i).fire && !req(i).bits.kill && req(i).bits.hyperinst, resp(i).fire, flush_pipe(i)))
+  val onlyS2xlate = vsatp.mode === 0.U && hgatp.mode === 8.U
   val flush_mmu = DelayN(sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed, q.fenceDelay)
   val mmu_flush_pipe = DelayN((sfence.valid && sfence.bits.flushPipe), q.fenceDelay) // for svinval, won't flush pipe
-  val flush_pipe = io.flushPipe
 
   // ATTENTION: csr and flush from backend are delayed. csr should not be later than flush.
   // because, csr will influence tlb behavior.
   val ifecth = if (q.fetchi) true.B else false.B
-  val mode = if (q.useDmode) csr.priv.dmode else csr.priv.imode
-  val hmode = Mux(isHyperInst.contains(true.B).asBool(), csr.priv.spvp, mode)
+  val mode_tmp = if (q.useDmode) csr.priv.dmode else csr.priv.imode
+  val mode = (0 until Width).map(i => Mux(isHyperInst(i), csr.priv.spvp, mode_tmp))
   val virt = csr.priv.virt
-  val sum = Mux(virt, io.csr.priv.vsum, io.csr.priv.sum)
-  val mxr = Mux(virt, io.csr.priv.vmxr, io.csr.priv.mxr)
+  val sum = (0 until Width).map(i => Mux(virt || isHyperInst(i), io.csr.priv.vsum, io.csr.priv.sum))
+  val mxr = (0 until Width).map(i => Mux(virt || isHyperInst(i), io.csr.priv.vmxr || io.csr.priv.mxr, io.csr.priv.mxr))
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
-  val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
-    else (satp.mode === 8.U) && (mode < ModeM)
-  val s2xlateEnable_tmp = (0 until Width).map(i => (isHyperInst(i) || virt) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode < ModeM))
-  val s2xlateEnable = (0 until Width).map(i => ValidHold(req(i).fire && !req(i).bits.kill && s2xlateEnable_tmp(i), resp(i).fire, flush_pipe(i)))
-  val portTranslateEnable = (0 until Width).map(i => (vmEnable || s2xlateEnable(i)) && !req(i).bits.no_translate)
+  val vmEnable = (0 until Width).map(i => if (EnbaleTlbDebug) (satp.mode === 8.U)
+    else (satp.mode === 8.U) && (mode(i) < ModeM))
+  val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode(i) < ModeM))
+  val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && !req(i).bits.no_translate)
 
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire()))
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
-  val refill = ptw.resp.fire() && !flush_mmu && (vmEnable || ptw.resp.bits.entry.s2xlate)
+  val refill = (0 until Width).map(i => ptw.resp.fire() && !flush_mmu && (vmEnable(i) || ptw.resp.bits.entry.s2xlate))
   io.refill_to_mem := DontCare
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, satp, vsatp, hgatp)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
-    entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, virt || isHyperInst(i))
-    entries.io.w_apply(refill, ptw.resp.bits, io.ptw_replenish)
+    entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, virt || req_in(i).bits.hyperinst)
+    entries.io.w_apply(refill(i), ptw.resp.bits, io.ptw_replenish)
     resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
     resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
   }
@@ -114,7 +114,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   (0 until Width).foreach{i =>
     pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
     for (d <- 0 until nRespDups) {
-      perm_check(perm(i)(d), req_out(i).cmd, static_pm(i), static_pm_v(i), i, d, req_out(i).hlvx)
+      perm_check(perm(i)(d), req_out(i).cmd, static_pm(i), static_pm_v(i), i, d, req_out(i).hlvx, mode(i), mxr(i), sum(i))
     }
   }
 
@@ -179,7 +179,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     pmp(idx).bits.cmd := cmd
   }
 
-  def perm_check(perm: TlbPermBundle, cmd: UInt, spm: TlbPMBundle, spm_v: Bool, idx: Int, nDups: Int, hlvx: Bool) = {
+  def perm_check(perm: TlbPermBundle, cmd: UInt, spm: TlbPMBundle, spm_v: Bool, idx: Int, nDups: Int, hlvx: Bool, mode: UInt, mxr: Bool, sum: Bool) = {
     // for timing optimization, pmp check is divided into dynamic and static
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
@@ -190,15 +190,15 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) // update A/D through exception
     val instrUpdate = !perm.a && TlbCmd.isExec(cmd) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!sum || ifecth))
-    val ldPermFail = !(modeCheck && (perm.r || mxr && perm.x || hlvx && perm.x))
+    val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || mxr && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
-    val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
-    val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
+    val ldPf = (Mux(onlyS2xlate, false.B, ldPermFail) || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
+    val stPf = (Mux(onlyS2xlate, false.B, stPermFail) || pf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmd)
-    val ldGPf = gpf && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
-    val stGPf = gpf && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
-    val instrGPf = gpf && TlbCmd.isExec(cmd)
+    val ldGPf = gpf && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)) && !ldPf
+    val stGPf = gpf && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !stPf
+    val instrGPf = gpf && TlbCmd.isExec(cmd) || !instrPf // for cmd write the VSR_GUR page
     val fault_valid = portTranslateEnable(idx)
     resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && fault_valid && !af
     resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && fault_valid && !af
@@ -232,6 +232,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
     io.ptw.req(idx).bits.vpn := RegNext(get_pn(req_out(idx).vaddr))
     io.ptw.req(idx).bits.gvpn := RegNext(get_pn(req_out(idx).vaddr))
+    io.ptw.req(idx).bits.cmd := RegNext(req_out(idx).cmd)
     io.ptw.req(idx).bits.memidx := RegNext(req_out(idx).memidx)
     io.ptw.req(idx).bits.hyperinst := RegNext(req_out(idx).hyperinst)
     io.ptw.req(idx).bits.hlvx := RegNext(req_out(idx).hlvx)
@@ -263,7 +264,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
       for (d <- 0 until nRespDups) {
         resp(idx).bits.paddr(d) := Cat(pte.entry.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
-        perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx, d, req_out(idx).hlvx)
+        perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx, d, req_out(idx).hlvx, mode(idx), mxr(idx), sum(idx))
       }
       pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, req_out(idx).cmd, idx)
 
@@ -278,6 +279,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     ptw_req.bits.gvpn := miss_req_gvpn
     ptw_req.bits.memidx := miss_req_memidx
     ptw_req.bits.hyperinst := req_out(idx).hyperinst
+    ptw_req.bits.cmd := req_out(idx).cmd
     ptw_req.bits.hlvx := req_out(idx).hlvx
     ptw_req.bits.virt := virt
     // NOTE: when flush pipe, tlb should abandon last req

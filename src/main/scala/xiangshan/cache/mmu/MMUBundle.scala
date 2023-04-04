@@ -787,6 +787,7 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
 class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W)
   val gvpn = UInt(gvpnLen.W)
+  val cmd = TlbCmd() // for 2 stage translate
   val hyperinst = Bool()
   val hlvx = Bool()
   val virt = Bool()
