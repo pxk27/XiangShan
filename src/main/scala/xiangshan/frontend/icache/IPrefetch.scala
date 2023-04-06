@@ -129,9 +129,10 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val tlb_resp_paddr = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.paddr(0))
   val tlb_resp_pf    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).pf.instr && tlb_resp_valid)
+  val tlb_resp_gpf    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).pf.instrG && tlb_resp_valid)
   val tlb_resp_af    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).af.instr && tlb_resp_valid)
 
-  val p1_exception  = VecInit(Seq(tlb_resp_pf, tlb_resp_af))
+  val p1_exception  = VecInit(Seq(tlb_resp_pf, tlb_resp_gpf, tlb_resp_af))
   val p1_has_except =  p1_exception.reduce(_ || _)
 
   val p1_ptag = get_phy_tag(tlb_resp_paddr)
@@ -157,13 +158,14 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val p2_paddr     = RegEnable(next = tlb_resp_paddr,  enable = p1_fire)
   val p2_except_pf = RegEnable(next =tlb_resp_pf, enable = p1_fire)
+  val p2_except_gpf = RegEnable(next =tlb_resp_gpf, enable = p1_fire)
   val p2_except_tlb_af = RegEnable(next = tlb_resp_af, enable = p1_fire)
 
   /*when a prefetch req meet with a miss req in MSHR cancle the prefetch req */
   val p2_check_in_mshr = VecInit(io.fromMSHR.map(mshr => mshr.valid && mshr.bits === addrAlign(p2_paddr, blockBytes, PAddrBits))).reduce(_||_)
 
   //TODO wait PMP logic
-  val p2_exception  = VecInit(Seq(p2_except_tlb_af, p2_except_pf)).reduce(_||_)
+  val p2_exception  = VecInit(Seq(p2_except_tlb_af, p2_except_pf, p2_except_gpf)).reduce(_||_)
 
   p2_ready :=   p2_fire || p2_discard || !p2_valid
   p2_fire  :=   p2_valid && !p2_exception && p3_ready

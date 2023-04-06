@@ -114,7 +114,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   (0 until Width).foreach{i =>
     pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
     for (d <- 0 until nRespDups) {
-      perm_check(perm(i)(d), req_out(i).cmd, static_pm(i), static_pm_v(i), i, d, req_out(i).hlvx, mode(i), mxr(i), sum(i))
+      perm_check(perm(i)(d), req_out(i).cmd, static_pm(i), static_pm_v(i), i, d, req_out(i).hlvx, mode(i), mxr(i), sum(i), virt || req_out(i).hyperinst)
     }
   }
 
@@ -179,7 +179,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     pmp(idx).bits.cmd := cmd
   }
 
-  def perm_check(perm: TlbPermBundle, cmd: UInt, spm: TlbPMBundle, spm_v: Bool, idx: Int, nDups: Int, hlvx: Bool, mode: UInt, mxr: Bool, sum: Bool) = {
+  def perm_check(perm: TlbPermBundle, cmd: UInt, spm: TlbPMBundle, spm_v: Bool, idx: Int, nDups: Int, hlvx: Bool, mode: UInt, mxr: Bool, sum: Bool, s2xlate: Bool) = {
     // for timing optimization, pmp check is divided into dynamic and static
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
@@ -193,16 +193,16 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || mxr && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
-    val ldPf = (Mux(onlyS2xlate, false.B, ldPermFail) || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
-    val stPf = (Mux(onlyS2xlate, false.B, stPermFail) || pf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
-    val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmd)
+    val ldPf = (Mux(onlyS2xlate && s2xlate, false.B, ldPermFail && perm.v) || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
+    val stPf = (Mux(onlyS2xlate && s2xlate, false.B, stPermFail && perm.v) || pf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
+    val instrPf = (Mux(onlyS2xlate && s2xlate, false.B, instrPermFail && perm.v) || pf) && TlbCmd.isExec(cmd)
     val ldGPf = gpf && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)) && !ldPf
     val stGPf = gpf && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !stPf
-    val instrGPf = gpf && TlbCmd.isExec(cmd) || !instrPf // for cmd write the VSR_GUR page
+    val instrGPf = gpf && TlbCmd.isExec(cmd) && !instrPf // for cmd write the VSR_GUR page
     val fault_valid = portTranslateEnable(idx)
-    resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && fault_valid && !af
-    resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && fault_valid && !af
-    resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && fault_valid && !af
+    resp(idx).bits.excp(nDups).pf.ld := (ldPf || Mux(onlyS2xlate && s2xlate, false.B, ldUpdate)) && fault_valid && !af
+    resp(idx).bits.excp(nDups).pf.st := (stPf || Mux(onlyS2xlate && s2xlate, false.B, stUpdate)) && fault_valid && !af
+    resp(idx).bits.excp(nDups).pf.instr := (instrPf || Mux(onlyS2xlate && s2xlate, false.B, instrUpdate)) && fault_valid && !af
     resp(idx).bits.excp(nDups).pf.ldG := ldGPf && fault_valid && !af
     resp(idx).bits.excp(nDups).pf.stG := stGPf && fault_valid && !af
     resp(idx).bits.excp(nDups).pf.instrG := instrGPf && fault_valid && !af
@@ -264,7 +264,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
       for (d <- 0 until nRespDups) {
         resp(idx).bits.paddr(d) := Cat(pte.entry.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
-        perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx, d, req_out(idx).hlvx, mode(idx), mxr(idx), sum(idx))
+        resp(idx).bits.gpaddr(d) := Cat(pte.entry.genGVPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
+        perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx, d, req_out(idx).hlvx, mode(idx), mxr(idx), sum(idx), virt || req_out(idx).hyperinst)
       }
       pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, req_out(idx).cmd, idx)
 
@@ -292,6 +293,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
           resp(idx).bits.excp(d).pf.ld := true.B // sfence happened, pf for not to use this addr
           resp(idx).bits.excp(d).pf.st := true.B
           resp(idx).bits.excp(d).pf.instr := true.B
+          resp(idx).bits.excp(d).pf.ldG := true.B // sfence happened, pf for not to use this addr
+          resp(idx).bits.excp(d).pf.stG := true.B
+          resp(idx).bits.excp(d).pf.instrG := true.B
         }
       }
     }

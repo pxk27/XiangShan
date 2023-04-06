@@ -965,7 +965,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val vaccessPermitted = !(addr === Vsatp.U && vtvmNotPermit)
   csrio.disableSfence := (tvmNotPermit || !virtMode && priviledgeMode < ModeS) || (vtvmNotPermit || virtMode && priviledgeMode < ModeS)
   csrio.disableHfenceg := !((!virtMode && priviledgeMode === ModeS && !mstatusStruct.tvm.asBool) || (priviledgeMode === ModeM)) // only valid in HS and mstatus.tvm == 0 or in M
-  csrio.disableHfencev :=  !(priviledgeMode === ModeM || (!virtMode && priviledgeMode === ModeH))
+  csrio.disableHfencev :=  !(priviledgeMode === ModeM || (!virtMode && priviledgeMode === ModeS))
   // general CSR wen check
   val wen = valid && CSROpType.needAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
@@ -1199,6 +1199,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val raiseIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
   val ivmEnable = tlbBundle.priv.imode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val iexceptionPC = Mux(ivmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
+  val iexceptionGPAddr = Mux(ivmEnable, SignExt(csrio.exception.bits.uop.cf.gpaddr, XLEN), csrio.exception.bits.uop.cf.gpaddr)
   val dvmEnable = tlbBundle.priv.dmode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val dexceptionPC = Mux(dvmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
   XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
@@ -1292,7 +1293,16 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
 
   when(RegNext(RegNext(updateTval_h))) {
-    val tval = memExceptionGPAddr >> 2
+    val tval_tmp = Mux(
+      RegNext(RegNext(hasInstGuestPageFault)),
+      RegNext(RegNext(Mux(
+        csrio.exception.bits.uop.cf.crossPageIPFFix,
+        SignExt(csrio.exception.bits.uop.cf.gpaddr + 2.U, XLEN),
+        iexceptionGPAddr
+      ))),
+      memExceptionGPAddr
+    )
+    val tval = tval_tmp >> 2
     when(RegNext(priviledgeMode === ModeM)) {
       mtval2 := tval
     }.otherwise {

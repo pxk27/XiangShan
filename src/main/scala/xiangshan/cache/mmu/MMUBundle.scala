@@ -51,7 +51,7 @@ class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   val x = Bool()
   val w = Bool()
   val r = Bool()
-
+  val v = Bool()
   override def toPrintable: Printable = {
     p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// +
     //(if(hasV) (p"v:${v}") else p"")
@@ -86,7 +86,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val x = Bool()
   val w = Bool()
   val r = Bool()
-
+  val v = Bool() // for H extention, but it will remove after rewrite mmu about H extention
   val pm = new TlbPMBundle
 
   def apply(item: PtwResp, pm: PMPConfig) = {
@@ -101,7 +101,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     this.x := ptePerm.x
     this.w := ptePerm.w
     this.r := ptePerm.r
-
+    this.v := ptePerm.v
     this.pm.assign_ap(pm)
     this
   }
@@ -583,6 +583,7 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     pm.x := perm.x
     pm.w := perm.w
     pm.r := perm.r
+    pm.v := perm.v
     pm
   }
 
@@ -613,6 +614,15 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
           0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn(vpnnLen*2-1, 0)),
           1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen-1, 0)),
           2.U -> ppn)
+    )
+  }
+
+  def genGVPN(vpn: UInt): UInt = {
+    if (!hasLevel) gvpn
+    else MuxLookup(level.get, 0.U, Seq(
+      0.U -> Cat(gvpn(gvpn.getWidth - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(gvpn(gvpn.getWidth - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
+      2.U -> gvpn)
     )
   }
 

@@ -425,15 +425,16 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val io = IO(new PTWIO)
   val sfence = io.sfence
   val mem = io.mem
-  val virt = io.csr.priv.virt
+  val hgatp = io.csr.hgatp
   val hyperInst = RegInit(false.B)
   val hlvx = RegInit(false.B)
+  val virt = RegInit(false.B) //virt will change when a exception is raised
+
   val satp = Mux((virt || hyperInst), io.csr.vsatp, io.csr.satp)
-  val hgatp = io.csr.hgatp
+  val flush = io.sfence.valid || satp.changed
   val onlyS1xlate = satp.mode =/= 0.U && hgatp.mode === 0.U
   val onlyS2xlate = satp.mode === 0.U && hgatp.mode =/= 0.U
   val s2xlate = (virt || hyperInst) && !onlyS1xlate
-  val flush = io.sfence.valid || satp.changed
 
   val level = RegInit(0.U(log2Up(Level).W))
   val af_level = RegInit(0.U(log2Up(Level).W)) // access fault return this level
@@ -478,7 +479,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val mem_addr = Mux(af_level === 0.U, pg_base, p_pte)
 
-  val gpaddr = Mux(onlyS2xlate, Cat(vpn, 0.U(offLen.W)), mem_addr)
+  val gpaddr = Mux(onlyS2xlate, Cat(gvpn, 0.U(offLen.W)), mem_addr)
   val hpaddr = MakeHPaddr(hptw_pte.ppn, hptw_level, gpaddr)
 
   io.req.ready := idle
@@ -489,10 +490,10 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val ret_pte = Wire(new PteBundle)
   ret_pte.reserved := hptw_pte.reserved
   ret_pte.ppn_high := hptw_pte.ppn_high
-  ret_pte.ppn := hptw_pte.ppn
+  ret_pte.ppn := hpaddr >> offLen
   ret_pte.rsw := hptw_pte.rsw
   ret_pte.perm := pte.perm
-  io.resp.bits.resp.apply(pageFault && !accessFault && !ppn_af && !hptw_pageFault, hptw_accessFault || accessFault || ppn_af, hptw_pageFault, Mux(accessFault, af_level, Mux(onlyS2xlate, 2.U, level)), Mux(s2xlate, ret_pte, pte), vpn, satp.asid, gpaddr >> 12.U, hgatp.asid, s2xlate)
+  io.resp.bits.resp.apply(pageFault && !accessFault && !ppn_af, hptw_accessFault || accessFault || ppn_af, hptw_pageFault, Mux(accessFault, af_level, Mux(onlyS2xlate, hptw_level, level)), Mux(s2xlate, ret_pte, pte), vpn, satp.asid, gpaddr >> 12.U, hgatp.asid, s2xlate)
 
 
   io.pmp.req.valid := DontCare // samecycle, do not use valid
@@ -519,16 +520,17 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.req.fire()){
     level := 0.U
     af_level := 0.U
-    ppn := satp.ppn
+    ppn := Mux((io.csr.priv.virt || io.req.bits.req_info.hyperinst), io.csr.vsatp.ppn, io.csr.satp.ppn)
     vpn := io.req.bits.req_info.vpn
     gvpn := io.req.bits.req_info.gvpn
     hyperInst := io.req.bits.req_info.hyperinst
     hlvx := io.req.bits.req_info.hlvx
+    virt := io.csr.priv.virt
     cmd := io.req.bits.req_info.cmd
     accessFault := false.B
     idle := false.B
     hptw_pageFault := false.B
-    when((io.req.bits.req_info.hyperinst || virt) && hgatp.mode =/= 0.U ){
+    when((io.req.bits.req_info.hyperinst || io.csr.priv.virt) && hgatp.mode =/= 0.U ){
       last_s2xlate := true.B
       s_hptw_req := false.B
     }.otherwise{

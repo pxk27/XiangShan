@@ -317,7 +317,12 @@ trait HasXSParameter {
   val HasIcache = coreParams.HasICache
   val HasDcache = coreParams.HasDCache
   val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
-  val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
+  val VAddrBits =
+    if(HasHExtension) {
+      coreParams.GPAddrBits
+    }else{
+      coreParams.VAddrBits
+    } // VAddrBits is Virtual Memory addr bits
   val GPAddrBits = coreParams.GPAddrBits
   val AsidLength = coreParams.AsidLength
   val VmidLength = coreParams.VmidLength

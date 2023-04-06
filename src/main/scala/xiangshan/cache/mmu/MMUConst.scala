@@ -152,6 +152,7 @@ trait HasTlbConst extends HasXSParameter {
     tp.x := ptePerm.x
     tp.w := ptePerm.w
     tp.r := ptePerm.r
+    tp.v := ptePerm.v // for H extention, but it will remove after rewrite mmu about H extention
     tp.pm := DontCare
     tp
   }

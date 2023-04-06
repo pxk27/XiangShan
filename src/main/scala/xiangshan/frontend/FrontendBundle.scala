@@ -114,10 +114,12 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val enqEnable = UInt(PredictWidth.W)
   val pd        = Vec(PredictWidth, new PreDecodeInfo)
   val pc        = Vec(PredictWidth, UInt(VAddrBits.W))
+  val gpaddr    = Vec(PredictWidth, UInt(GPAddrBits.W))
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
   val ipf          = Vec(PredictWidth, Bool())
+  val igpf         = Vec(PredictWidth, Bool())
   val acf          = Vec(PredictWidth, Bool())
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, new TriggerCf)
