@@ -189,9 +189,9 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     }
   }
 
-  def apply(item: PtwResp, asid: UInt, pm: PMPConfig): TlbEntry = {
+  def apply(item: PtwResp, pm: PMPConfig): TlbEntry = {
     this.tag := {if (pageNormal) item.entry.tag else item.entry.tag(vpnLen-1, vpnnLen)}
-    this.asid := asid
+    this.asid := item.entry.asid
     val inner_level = item.entry.level.getOrElse(0.U)
     this.level.map(_ := { if (pageNormal && pageSuper) MuxLookup(inner_level, 0.U, Seq(
                                                         0.U -> 3.U,

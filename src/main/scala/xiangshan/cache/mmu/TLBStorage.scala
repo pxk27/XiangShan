@@ -142,7 +142,7 @@ class TLBFA(
 
   when (io.w.valid) {
     v(io.w.bits.wayIdx) := true.B
-    entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)
+    entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.w.bits.data_replenish)
   }
   // write assert, shoulg not duplicate with the existing entries
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.hit(io.w.bits.data.entry.tag, io.csr.satp.asid, io.w.bits.data.entry.s2xlate, vmid = io.csr.hgatp.asid) && vi })
@@ -168,7 +168,7 @@ class TLBFA(
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid when virt == false
         // all entry which vmid === hgatp.vmid when virt == true
-        v.zipWithIndex.map{ case (a, i) => a := a && !((io.csr.priv.virt === false.B) || (io.csr.priv.virt && entries(i).s2xlate && entries(i).vmid === io.csr.hgatp.asid))}
+        v.zipWithIndex.map{ case (a, i) => a := a && !((io.csr.priv.virt === false.B && !entries(i).s2xlate) || (io.csr.priv.virt && entries(i).s2xlate && entries(i).vmid === io.csr.hgatp.asid))}
       }.otherwise {
         // when virt == false, host entries(asid == sfence.asid)
         // when virt == true, guest entries(vimd == hgatp.vmid && asid == sfence.asid)
@@ -320,7 +320,7 @@ class TLBSA(
     get_set_idx(io.w.bits.data.entry.tag, nSets),
     get_set_idx(io.victim.in.bits.entry.tag, nSets))
   entries.io.wdata := Mux(io.w.valid,
-    (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.csr.satp.asid, io.w.bits.data_replenish)),
+    (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data, io.w.bits.data_replenish)),
     io.victim.in.bits.entry)
 
   when (io.victim.in.valid) {
