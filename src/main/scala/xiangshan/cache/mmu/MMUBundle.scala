@@ -51,7 +51,7 @@ class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   val x = Bool()
   val w = Bool()
   val r = Bool()
-  val v = Bool()
+
   override def toPrintable: Printable = {
     p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// +
     //(if(hasV) (p"v:${v}") else p"")
@@ -86,7 +86,6 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val x = Bool()
   val w = Bool()
   val r = Bool()
-  val v = Bool() // for H extention, but it will remove after rewrite mmu about H extention
   val pm = new TlbPMBundle
 
   def apply(item: PtwResp, pm: PMPConfig) = {
@@ -101,7 +100,6 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     this.x := ptePerm.x
     this.w := ptePerm.w
     this.r := ptePerm.r
-    this.v := ptePerm.v
     this.pm.assign_ap(pm)
     this
   }
@@ -583,7 +581,6 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     pm.x := perm.x
     pm.w := perm.w
     pm.r := perm.r
-    pm.v := perm.v
     pm
   }
 

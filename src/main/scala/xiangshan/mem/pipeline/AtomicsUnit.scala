@@ -62,6 +62,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   val isLr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
   // paddr after translation
   val paddr = Reg(UInt())
+  val gpaddr = Reg(UInt())
   val vaddr = in.src(0)
   val is_mmio = Reg(Bool())
   // pmp check
@@ -82,7 +83,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   io.exceptionAddr.valid := atom_override_xtval
   io.exceptionAddr.bits.vaddr  := in.src(0)
-  io.exceptionAddr.bits.gpaddr := paddr
+  io.exceptionAddr.bits.gpaddr := gpaddr
   // assign default value to output signals
   io.in.ready          := false.B
 
@@ -149,6 +150,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
     when(io.dtlb.resp.fire && have_sent_first_tlb_req){
       paddr := io.dtlb.resp.bits.paddr(0)
+      gpaddr := io.dtlb.resp.bits.gpaddr(0)
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
