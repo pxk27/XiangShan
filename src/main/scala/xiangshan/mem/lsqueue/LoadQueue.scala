@@ -61,6 +61,17 @@ trait HasLoadHelper { this: XSModule =>
       LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
       LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
+
+      // hypervisor
+      LSUOpType.hlvb -> SignExt(rdata(7, 0), XLEN),
+      LSUOpType.hlvh -> SignExt(rdata(15, 0), XLEN),
+      LSUOpType.hlvw -> SignExt(rdata(31, 0), XLEN),
+      LSUOpType.hlvd -> SignExt(rdata(63, 0), XLEN),
+      LSUOpType.hlvbu -> ZeroExt(rdata(7, 0), XLEN),
+      LSUOpType.hlvhu -> ZeroExt(rdata(15, 0), XLEN),
+      LSUOpType.hlvwu -> ZeroExt(rdata(31, 0), XLEN),
+      LSUOpType.hlvxhu -> ZeroExt(rdata(15, 0), XLEN),
+      LSUOpType.hlvxwu -> ZeroExt(rdata(31, 0), XLEN),
     ))
   }
 }
@@ -141,6 +152,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   }
 
   io.exceptionAddr.vaddr := req.vaddr
+  io.exceptionAddr.gpaddr := req.gpaddr
   XSPerfAccumulate("exception", !RegNext(req_valid) && req_valid)
   
   // end

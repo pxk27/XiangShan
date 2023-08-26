@@ -47,10 +47,13 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
     Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src(0)(VAddrBits-1, 12)),
   )
   val saddr = Cat(saddr_hi, saddr_lo(11,0))
+  val isHsv = WireInit(LSUOpType.isHsv(io.in.bits.uop.ctrl.fuOpType))
 
   io.dtlbReq.bits.vaddr := saddr
   io.dtlbReq.valid := io.in.valid
   io.dtlbReq.bits.cmd := TlbCmd.write
+  io.dtlbReq.bits.hyperinst := isHsv
+  io.dtlbReq.bits.hlvx := false.B
   io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
   io.dtlbReq.bits.kill := DontCare
   io.dtlbReq.bits.memidx.is_ld := false.B
@@ -116,6 +119,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_inval
 
   val s1_paddr = io.dtlbResp.bits.paddr(0)
+  val s1_gpaddr = io.dtlbResp.bits.gpaddr(0)
   val s1_tlb_miss = io.dtlbResp.bits.miss
 
   val s1_mmio = is_mmio_cbo
@@ -150,11 +154,13 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.out.valid := io.in.valid && !s1_tlb_miss
   io.out.bits := io.in.bits
   io.out.bits.paddr := s1_paddr
+  io.out.bits.gpaddr := s1_gpaddr
   io.out.bits.miss := false.B
   io.out.bits.mmio := s1_mmio
   io.out.bits.atomic := s1_mmio
   io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp(0).pf.st
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp(0).af.st
+  io.out.bits.uop.cf.exceptionVec(storeGuestPageFault) := io.dtlbResp.bits.excp(0).gpf.st
 
   io.lsq.valid := io.in.valid
   io.lsq.bits := io.out.bits

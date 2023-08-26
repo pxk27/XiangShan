@@ -401,6 +401,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.interrupt <> ctrlBlock.io.robio.toCSR.intrBitSet
   csrioIn.wfi_event <> ctrlBlock.io.robio.toCSR.wfiEvent
   csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
+  csrioIn.memExceptionGPAddr <> memBlock.io.lsqio.exceptionAddr.gpaddr
 
   csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
   csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
@@ -427,7 +428,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2Hint.valid := io.l2Hint.valid
   memBlock.io.l2Hint.bits.sourceId := io.l2Hint.bits.sourceId
 
-  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay,frontend.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.ifilterSize)
+  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, frontend.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.ifilterSize)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, csrioIn.tlb)
   val dtlbRepeater1  = PTWFilter(ldtlbParams.fenceDelay, memBlock.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.dfilterSize)
   val dtlbRepeater2  = PTWRepeaterNB(passReady = false, ldtlbParams.fenceDelay, dtlbRepeater1.io.ptw, ptw.io.tlb(1), fenceio.sfence, csrioIn.tlb)

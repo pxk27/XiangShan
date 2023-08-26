@@ -53,6 +53,7 @@ object genWdata {
 class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with HasDCacheParameters{
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
+  val gpaddr = UInt(GPAddrBits.W)
   // val func = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt((XLEN+1).W)
@@ -100,6 +101,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle) = {
     vaddr := input.vaddr
     paddr := input.paddr
+    gpaddr := input.gpaddr
     mask := input.mask
     data := input.data
     uop := input.uop
@@ -141,6 +143,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle) = {
     vaddr := input.vaddr
     paddr := input.paddr
+    gpaddr := input.gpaddr
     mask := input.mask
     data := input.data
     uop := input.uop
@@ -174,6 +177,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
+  val gpaddr = Output(UInt(GPAddrBits.W))
   val mask = Output(UInt(8.W))
   override val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug

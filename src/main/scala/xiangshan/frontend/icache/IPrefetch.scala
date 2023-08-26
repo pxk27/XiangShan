@@ -72,7 +72,7 @@ class IPrefetchToMissUnit(implicit  p: Parameters) extends IPrefetchBundle{
 class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val fromFtq         = Flipped(new FtqPrefechBundle)
   val iTLBInter       = new TlbRequestIO
-  val pmp             =   new ICachePMPBundle
+  val pmp             = new ICachePMPBundle
   val toIMeta         = Decoupled(new ICacheMetaReadReqBundle)
   val fromIMeta       = Input(new ICacheMetaReadRespBundle)
   val toMissUnit      = new IPrefetchToMissUnit
@@ -535,6 +535,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toITLB.bits.debug.isFirstIssue  := DontCare
   toITLB.bits.memidx              := DontCare
   toITLB.bits.no_translate        := false.B
+  toITLB.bits.hyperinst := DontCare
+  toITLB.bits.hlvx := DontCare
 
   fromITLB.ready := true.B
 
@@ -553,8 +555,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val tlb_resp_paddr = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.paddr(0))
   val tlb_resp_pf    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).pf.instr && tlb_resp_valid)
   val tlb_resp_af    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).af.instr && tlb_resp_valid)
-
-  val p1_exception  = VecInit(Seq(tlb_resp_pf, tlb_resp_af))
+  val tlb_resp_gpf = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).gpf.instr && tlb_resp_valid)
+  val p1_exception  = VecInit(Seq(tlb_resp_pf, tlb_resp_gpf, tlb_resp_af))
   val p1_has_except =  p1_exception.reduce(_ || _)
   val p1_paddr = tlb_resp_paddr
 
@@ -587,8 +589,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val p2_paddr     = RegEnable(p1_paddr,  p1_fire)
   val p2_except_pf = RegEnable(tlb_resp_pf, p1_fire)
+  val p2_except_gpf = RegEnable(tlb_resp_gpf, p1_fire)
   val p2_except_af = DataHoldBypass(pmpExcpAF, p2_pmp_fire) || RegEnable(tlb_resp_af, p1_fire)
-  val p2_mmio      = DataHoldBypass(io.pmp.resp.mmio && !p2_except_af && !p2_except_pf, p2_pmp_fire)
+  val p2_mmio      = DataHoldBypass(io.pmp.resp.mmio && !p2_except_af && !p2_except_pf && !p2_except_gpf, p2_pmp_fire)
   val p2_vaddr   =  RegEnable(p1_vaddr,    p1_fire)
 
 

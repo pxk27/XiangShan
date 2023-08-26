@@ -225,6 +225,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val isPrefetchRead = WireInit(s0_uop.ctrl.fuOpType === LSUOpType.prefetch_r)
   val isPrefetchWrite = WireInit(s0_uop.ctrl.fuOpType === LSUOpType.prefetch_w)
   val isHWPrefetch = lfsrc_hwprefetch_select
+  val isHlv = WireInit(LSUOpType.isHlv(s0_uop.ctrl.fuOpType))
+  val isHlvx = WireInit(LSUOpType.isHlvx(s0_uop.ctrl.fuOpType))
 
   // query DTLB
   io.dtlbReq.valid := s0_valid
@@ -234,6 +236,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
     Mux(isPrefetchWrite, TlbCmd.write, TlbCmd.read),
     TlbCmd.read
   )
+  io.dtlbReq.bits.hyperinst := isHlv
+  io.dtlbReq.bits.hlvx := isHlvx
   io.dtlbReq.bits.size := LSUOpType.size(s0_uop.ctrl.fuOpType)
   io.dtlbReq.bits.kill := DontCare
   io.dtlbReq.bits.memidx.is_ld := true.B
@@ -445,6 +449,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   val s1_uop = io.in.bits.uop
   val s1_paddr_dup_lsu = io.dtlbResp.bits.paddr(0)
+  val s1_gpaddr_dup_lsu = io.dtlbResp.bits.gpaddr(0)
   val s1_paddr_dup_dcache = io.dtlbResp.bits.paddr(1)
   // af & pf exception were modified below.
   val s1_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
@@ -472,6 +477,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.sbuffer.valid := io.in.valid && !(s1_exception || s1_tlb_miss || io.s1_kill || s1_is_prefetch)
   io.sbuffer.vaddr := io.in.bits.vaddr
   io.sbuffer.paddr := s1_paddr_dup_lsu
+  io.sbuffer.gpaddr := s1_gpaddr_dup_lsu
   io.sbuffer.uop := s1_uop
   io.sbuffer.sqIdx := s1_uop.sqIdx
   io.sbuffer.mask := s1_mask
@@ -480,6 +486,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.lsq.valid := io.in.valid && !(s1_exception || s1_tlb_miss || io.s1_kill || s1_is_prefetch)
   io.lsq.vaddr := io.in.bits.vaddr
   io.lsq.paddr := s1_paddr_dup_lsu
+  io.lsq.gpaddr := s1_gpaddr_dup_lsu
   io.lsq.uop := s1_uop
   io.lsq.sqIdx := s1_uop.sqIdx
   io.lsq.sqIdxMask := DontCare // will be overwritten by sqIdxMask pre-generated in s0
@@ -498,6 +505,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   io.out.valid := io.in.valid && !io.s1_kill
   io.out.bits.paddr := s1_paddr_dup_lsu
+  io.out.bits.gpaddr := s1_gpaddr_dup_lsu
   io.out.bits.tlbMiss := s1_tlb_miss
 
   // Generate replay signal caused by:
@@ -510,6 +518,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasCircularQueue
   // af & pf exception were modified
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp(0).pf.ld
   io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp(0).af.ld
+  io.out.bits.uop.cf.exceptionVec(loadGuestPageFault) := io.dtlbResp.bits.excp(0).pf.ldG
   io.out.bits.ptwBack := io.dtlbResp.bits.ptwBack
   io.out.bits.rsIdx := io.in.bits.rsIdx
 
