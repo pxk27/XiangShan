@@ -96,7 +96,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   private val misc = LazyModule(new XSTileMisc())
   private val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new CoupledL2()(new Config((_, _, _) => {
-      case L2ParamKey => l2param.copy(hartIds = Seq(p(XSCoreParamsKey).HartId))
+      case L2ParamKey => l2param.copy(
+        hartIds = Seq(p(XSCoreParamsKey).HartId),
+        FPGAPlatform = debugOpts.FPGAPlatform
+      )
     })))
   )
 
@@ -127,7 +130,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
   misc.misc_l2_pmu := TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.frontend.icache.clientNode
   if (!coreParams.softPTW) {
-    misc.misc_l2_pmu := TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.ptw_to_l2_buffer.node 
+    misc.misc_l2_pmu := TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.memBlock.ptw_to_l2_buffer.node
   } 
 
   l2cache match {
@@ -174,12 +177,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       // misc.module.beu_errors.l2.ecc_error.valid := l2cache.get.module.io.ecc_error.valid
       // misc.module.beu_errors.l2.ecc_error.bits := l2cache.get.module.io.ecc_error.bits
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
-      core.module.io.l2Hint.bits.sourceId := l2cache.get.module.io.l2_hint.bits
-      core.module.io.l2Hint.valid := l2cache.get.module.io.l2_hint.valid
+      core.module.io.l2_hint.bits.sourceId := l2cache.get.module.io.l2_hint.bits
+      core.module.io.l2_hint.valid := l2cache.get.module.io.l2_hint.valid
     } else {
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
-      core.module.io.l2Hint.bits.sourceId := DontCare
-      core.module.io.l2Hint.valid := false.B
+      core.module.io.l2_hint.bits.sourceId := DontCare
+      core.module.io.l2_hint.valid := false.B
     }
 
     // Modules are reset one by one
