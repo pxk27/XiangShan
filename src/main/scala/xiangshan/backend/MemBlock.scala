@@ -82,6 +82,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
 
   val lsqio = new Bundle {
     val vaddr = Output(UInt(VAddrBits.W))
+    val gpaddr = Output(UInt(GPAddrBits.W))
     val mmio = Output(Vec(LoadPipelineWidth, Bool()))
     val uop = Output(Vec(LoadPipelineWidth, new MicroOp))
     val lqCanAccept = Output(Bool())
@@ -227,7 +228,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.out.ready := ldout0.ready
   loadUnits.head.io.ldout.ready := ldout0.ready
   when(atomicsUnit.io.out.valid){
-    loadOut0.bits.uop.cf.exceptionVec := 0.U(24.W).asBools // exception will be writebacked via store wb port
+    ldout0.bits.uop.cf.exceptionVec := 0.U(24.W).asBools // exception will be writebacked via store wb port
   }
 
   val ldExeWbReqs = ldout0 +: loadUnits.tail.map(_.io.ldout)
@@ -319,15 +320,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     require(ldtlbParams.outReplace)
 
     val replace = Module(new TlbReplace(exuParameters.LduCnt + exuParameters.StuCnt + 1, ldtlbParams))
-    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace), ptwio.resp.bits.data.entry.tag)
+    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
   } else {
     if (ldtlbParams.outReplace) {
       val replace_ld = Module(new TlbReplace(exuParameters.LduCnt, ldtlbParams))
-      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
+      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (sttlbParams.outReplace) {
       val replace_st = Module(new TlbReplace(exuParameters.StuCnt, sttlbParams))
-      replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.entry.tag)
+      replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
   }
 
@@ -343,8 +344,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val vector_hit = if (refillBothTlb) Cat(ptw_resp_next.vector).orR
       else if (i < exuParameters.LduCnt) Cat(ptw_resp_next.vector.take(exuParameters.LduCnt)).orR
       else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt)).orR
+    val hasS2xlate = tlb.bits.hasS2xlate()
     ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
-      ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true, tlb.bits.virt || tlb.bits.hyperinst))
+      ptw_resp_next.data.s1.hit(tlb.bits.vpn, Mux(hasS2xlate, tlbcsr.vsatp.asid, tlbcsr.satp.asid), tlbcsr.hgatp.asid, allType = true, ignoreAsid = true, hasS2xlate))
   }
   dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {
@@ -372,8 +374,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   for (i <- 0 until 8) {
     val pmp_check_ptw = Module(new PMPCheckerv2(lgMaxSize = 3, sameCycle = false, leaveHitMux = true))
-    pmp_check_ptw.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, ptwio.resp.valid,
-      Cat(ptwio.resp.bits.data.entry.ppn, ptwio.resp.bits.data.ppn_low(i), 0.U(12.W)).asUInt)
+    pmp_check_ptw.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, ptwio.resp.valid, ptwio.resp.bits.data.genPPNS2(i))
     dtlb.map(_.ptw_replenish(i) := pmp_check_ptw.io.resp)
   }
 
