@@ -102,10 +102,10 @@ trait HasTlbConst extends HasXSParameter {
 
   val timeOutThreshold = 10000
 
-  val noS2xlate = "b00".U
-  val allStage = "b11".U
-  val onlyStage1 = "b10".U
-  val onlyStage2 = "b01".U
+  def noS2xlate = "b00".U
+  def allStage = "b11".U
+  def onlyStage1 = "b10".U
+  def onlyStage2 = "b01".U
 
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)
@@ -148,7 +148,7 @@ trait HasTlbConst extends HasXSParameter {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
 
-  def hptwresp_to_tlbperm(hptwResp: HptwResp): TlbPermBundle = {
+  implicit def hptwresp_to_tlbperm(hptwResp: HptwResp): TlbPermBundle = {
     val tp = Wire(new TlbPermBundle)
     val ptePerm = hptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := hptwResp.gpf
@@ -163,7 +163,8 @@ trait HasTlbConst extends HasXSParameter {
     tp.pm := DontCare
     tp
   }
-  def ptwresp_to_tlbperm(ptwResp: PtwSectorResp): TlbPermBundle = {
+
+  implicit def ptwresp_to_tlbperm(ptwResp: PtwSectorResp): TlbPermBundle = {
     val tp = Wire(new TlbPermBundle)
     val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := ptwResp.pf
