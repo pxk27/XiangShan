@@ -64,13 +64,14 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val satp = DelayN(io.csr.satp, q.fenceDelay)
   val vsatp = DelayN(io.csr.vsatp, q.fenceDelay)
   val hgatp = DelayN(io.csr.hgatp, q.fenceDelay)
-  val isHyperInst = (0 until Width).map(i => ValidHold(req(i).fire && !req(i).bits.kill && req(i).bits.hyperinst, resp(i).fire, flush_pipe(i)))
-  val isHlvx = (0 until Width).map(i => ValidHold(req(i).fire && !req(i).bits.kill && req(i).bits.hlvx, resp(i).fire, flush_pipe(i)))
-  val onlyS2xlate = vsatp.mode === 0.U && hgatp.mode === 8.U
 
   val flush_mmu = DelayN(sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed, q.fenceDelay)
   val mmu_flush_pipe = DelayN(sfence.valid && sfence.bits.flushPipe, q.fenceDelay) // for svinval, won't flush pipe
   val flush_pipe = io.flushPipe
+
+  val isHyperInst = (0 until Width).map(i => ValidHold(req(i).fire && !req(i).bits.kill && req(i).bits.hyperinst, resp(i).fire, flush_pipe(i)))
+  val isHlvx = (0 until Width).map(i => ValidHold(req(i).fire && !req(i).bits.kill && req(i).bits.hlvx, resp(i).fire, flush_pipe(i)))
+  val onlyS2xlate = vsatp.mode === 0.U && hgatp.mode === 8.U
 
   // ATTENTION: csr and flush from backend are delayed. csr should not be later than flush.
   // because, csr will influence tlb behavior.
@@ -172,16 +173,17 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
     val gvpn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(vpnLen.W))))
     val g_perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
+    val r_s2xlate = WireInit(VecInit(Seq.fill(nRespDups)(0.U(2.W))))
     for (d <- 0 until nRespDups) {
       ppn(d) := Mux(p_hit, p_ppn, e_ppn(d))
       perm(d) := Mux(p_hit, p_perm, e_perm(d))
       gvpn(d) :=  p_gvpn
       g_perm(d) := Mux(p_hit, p_g_perm, e_g_perm(d))
-      s2xlate(d) := Mux(p_hit, p_s2xlate, e_s2xlate(d))
+      r_s2xlate(d) := Mux(p_hit, p_s2xlate, e_s2xlate(d))
       val paddr = Cat(ppn(d), get_off(req_out(i).vaddr))
       val gpaddr = Cat(gvpn(d), get_off(req_out(i).vaddr))
       resp(i).bits.paddr(d) := Mux(enable, paddr, vaddr)
-      resp(i).bits.gpaddr(d) := Mux(s2xlate === onlyStage2, vaddr, gpaddr)
+      resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, vaddr, gpaddr)
     }
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
@@ -439,11 +441,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       difftest.io.valid := l1tlbid =/= 3.U && RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && !gpf && portTranslateEnable(i)
       difftest.io.index := i.U
       difftest.io.l1tlbid := l1tlbid
-      difftest.io.satp := io.csr.satp
       difftest.io.vpn := RegNext(get_pn(req_in(i).bits.vaddr))
       difftest.io.ppn := get_pn(io.requestor(i).resp.bits.paddr(0))
-      difftest.io.vsatp := io.csr.vsatp
-      difftest.io.hgatp := io.csr.hgatp
+      difftest.io.satp := Cat(io.csr.satp.mode, io.csr.satp.asid, io.csr.satp.ppn)
+      difftest.io.vsatp := Cat(io.csr.vsatp.mode, io.csr.vsatp.asid, io.csr.vsatp.ppn)
+      difftest.io.hgatp := Cat(io.csr.hgatp.mode, io.csr.hgatp.asid, io.csr.hgatp.ppn)
       val s2xlate = Wire(UInt(2.W))
       s2xlate := MuxCase(noS2xlate, Seq(
         (!(virt || req_in(i).bits.hyperinst)) -> noS2xlate,

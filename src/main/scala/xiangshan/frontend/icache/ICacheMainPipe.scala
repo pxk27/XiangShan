@@ -208,15 +208,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toITLB(0).bits.size     := 3.U // TODO: fix the size
   toITLB(0).bits.vaddr    := ftq_req_to_itlb_vaddr(0)
   toITLB(0).bits.debug.pc := ftq_req_to_itlb_vaddr(0)
-  toITLB(0).bits.hlvx     := DontCare
-  toITLB(0).bits.hyperinst:= DontCare
 
   toITLB(1).valid         := s0_valid && ftq_req_to_itlb_doubleline
   toITLB(1).bits.size     := 3.U // TODO: fix the size
   toITLB(1).bits.vaddr    := ftq_req_to_itlb_vaddr(1)
   toITLB(1).bits.debug.pc := ftq_req_to_itlb_vaddr(1)
-  toITLB(1).bits.hlvx := DontCare
-  toITLB(1).bits.hyperinst := DontCare
 
   toITLB.map{port =>
     port.bits.cmd                 := TlbCmd.exec
@@ -224,6 +220,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     port.bits.debug.robIdx        := DontCare
     port.bits.no_translate        := false.B
     port.bits.debug.isFirstIssue  := DontCare
+    port.bits.hlvx                := DontCare
+    port.bits.hyperinst           := DontCare
   }
 
   /** ITLB & ICACHE sync case
