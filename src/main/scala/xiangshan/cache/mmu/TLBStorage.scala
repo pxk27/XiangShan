@@ -619,7 +619,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
       rp.bits.perm(d).w := Mux(sp.bits.hit, sp.bits.perm(0).w, np.bits.perm(d).w)
       rp.bits.perm(d).r := Mux(sp.bits.hit, sp.bits.perm(0).r, np.bits.perm(d).r)
       rp.bits.perm(d).pm := DontCare
-
+      rp.bits.s2xlate(d) := Mux(sp.bits.hit, sp.bits.s2xlate(0), np.bits.s2xlate(d))
       rp.bits.g_perm(d) := Mux(sp.bits.hit, sp.bits.g_perm(0), np.bits.g_perm(d))
     }
     rp.bits.super_hit := sp.bits.hit
