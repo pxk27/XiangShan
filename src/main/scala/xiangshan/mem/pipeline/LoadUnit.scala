@@ -350,6 +350,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := false.B
     s0_prf_wr        := false.B
     s0_sched_idx     := 0.U
+    s0_hlv           := false.B
+    s0_hlvx          := false.B
   }
 
   def fromFastReplaySource(src: LqWriteBundle) = {
@@ -369,6 +371,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := src.schedIndex
+    s0_hlv           := LSUOpType.isHlv(src.uop.ctrl.fuOpType)
+    s0_hlvx          := LSUOpType.isHlvx(src.uop.ctrl.fuOpType)
   }
 
   def fromNormalReplaySource(src: LsPipelineBundle) = {
@@ -388,6 +392,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := src.schedIndex
+    s0_hlv           := LSUOpType.isHlv(src.uop.ctrl.fuOpType)
+    s0_hlvx          := LSUOpType.isHlvx(src.uop.ctrl.fuOpType)
   }
 
   def fromPrefetchSource(src: L1PrefetchReq) = {
@@ -407,6 +413,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := !src.is_store
     s0_prf_wr        := src.is_store
     s0_sched_idx     := 0.U
+    s0_hlv           := false.B
+    s0_hlvx          := false.B
   }
 
   def fromIntIssueSource(src: ExuInput) = {
@@ -426,6 +434,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := 0.U
+    s0_hlv           := LSUOpType.isHlv(src.uop.ctrl.fuOpType)
+    s0_hlvx          := LSUOpType.isHlvx(src.uop.ctrl.fuOpType)
   }
 
   def fromVecIssueSource() = {
@@ -445,6 +455,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := false.B
     s0_prf_wr        := false.B
     s0_sched_idx     := 0.U
+    s0_hlv           := false.B
+    s0_hlvx          := false.B
   }
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
@@ -468,6 +480,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd             := false.B
     s0_prf_wr             := false.B
     s0_sched_idx          := 0.U
+    s0_hlv                := LSUOpType.isHlv(s0_uop.ctrl.fuOpType)
+    s0_hlvx               := LSUOpType.isHlvx(s0_uop.ctrl.fuOpType)
   }
 
   // set default
@@ -605,6 +619,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_prf)
   io.sbuffer.vaddr := s1_vaddr
   io.sbuffer.paddr := s1_paddr_dup_lsu
+  io.sbuffer.gpaddr:= s1_gpaddr_dup_lsu
   io.sbuffer.uop   := s1_in.uop
   io.sbuffer.sqIdx := s1_in.uop.sqIdx
   io.sbuffer.mask  := s1_in.mask

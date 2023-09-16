@@ -85,6 +85,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.tlb.req.bits.debug.pc     := s0_in.uop.cf.pc
   io.tlb.req.bits.debug.isFirstIssue := s0_isFirstIssue
   io.tlb.req_kill              := false.B
+  io.tlb.req.bits.hyperinst    := LSUOpType.isHsv(s0_in.uop.ctrl.fuOpType)
+  io.tlb.req.bits.hlvx         := false.B
 
   s0_out              := DontCare
   s0_out.vaddr        := s0_saddr
