@@ -405,29 +405,29 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   if (env.EnableDifftest) {
     for (i <- 0 until PtwWidth) {
-      val difftest = DifftestModule(new DifftestL2TLBEvent)
-      difftest.io.clock := clock
-      difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
-      difftest.io.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.s1.af && !io.tlb(i).resp.bits.s2.gaf
-      difftest.io.index := i.U
-      difftest.io.vpn := Cat(io.tlb(i).resp.bits.s1.entry.tag, 0.U(sectortlbwidth.W))
+      val difftest = DifftestModule(new DiffL2TLBEvent)
+      difftest.clock := clock
+      difftest.coreid := p(XSCoreParamsKey).HartId.asUInt
+      difftest.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.s1.af && !io.tlb(i).resp.bits.s2.gaf
+      difftest.index := i.U
+      difftest.vpn := Cat(io.tlb(i).resp.bits.s1.entry.tag, 0.U(sectortlbwidth.W))
       for (j <- 0 until tlbcontiguous) {
         difftest.ppn(j) := Cat(io.tlb(i).resp.bits.s1.entry.ppn, io.tlb(i).resp.bits.s1.ppn_low(j))
         difftest.valididx(j) := io.tlb(i).resp.bits.s1.valididx(j)
-        difftest.io.pteidx(j) := io.tlb(i).resp.bits.s1.pteidx(j)
+        difftest.pteidx(j) := io.tlb(i).resp.bits.s1.pteidx(j)
       }
-      difftest.io.perm := io.tlb(i).resp.bits.s1.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
-      difftest.io.level := io.tlb(i).resp.bits.s1.entry.level.getOrElse(0.U.asUInt)
-      difftest.io.pf := io.tlb(i).resp.bits.s1.pf
-      difftest.io.satp := Cat(io.csr.tlb.satp.mode, io.csr.tlb.satp.asid, io.csr.tlb.satp.ppn)
-      difftest.io.vsatp := Cat(io.csr.tlb.vsatp.mode, io.csr.tlb.vsatp.asid, io.csr.tlb.vsatp.ppn)
-      difftest.io.hgatp := Cat(io.csr.tlb.hgatp.mode, io.csr.tlb.hgatp.asid, io.csr.tlb.hgatp.ppn)
-      difftest.io.gvpn := io.tlb(i).resp.bits.s2.entry.tag
-      difftest.io.g_perm := io.tlb(i).resp.bits.s2.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
-      difftest.io.g_level := io.tlb(i).resp.bits.s2.entry.level.getOrElse(0.U.asUInt)
-      difftest.io.s2ppn := io.tlb(i).resp.bits.s2.entry.ppn
-      difftest.io.gpf := io.tlb(i).resp.bits.s2.gpf
-      difftest.io.s2xlate := io.tlb(i).resp.bits.s2xlate
+      difftest.perm := io.tlb(i).resp.bits.s1.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
+      difftest.level := io.tlb(i).resp.bits.s1.entry.level.getOrElse(0.U.asUInt)
+      difftest.pf := io.tlb(i).resp.bits.s1.pf
+      difftest.satp := Cat(io.csr.tlb.satp.mode, io.csr.tlb.satp.asid, io.csr.tlb.satp.ppn)
+      difftest.vsatp := Cat(io.csr.tlb.vsatp.mode, io.csr.tlb.vsatp.asid, io.csr.tlb.vsatp.ppn)
+      difftest.hgatp := Cat(io.csr.tlb.hgatp.mode, io.csr.tlb.hgatp.asid, io.csr.tlb.hgatp.ppn)
+      difftest.gvpn := io.tlb(i).resp.bits.s2.entry.tag
+      difftest.g_perm := io.tlb(i).resp.bits.s2.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
+      difftest.g_level := io.tlb(i).resp.bits.s2.entry.level.getOrElse(0.U.asUInt)
+      difftest.s2ppn := io.tlb(i).resp.bits.s2.entry.ppn
+      difftest.gpf := io.tlb(i).resp.bits.s2.gpf
+      difftest.s2xlate := io.tlb(i).resp.bits.s2xlate
     }
   }
 
