@@ -32,6 +32,7 @@ import xiangshan.backend.fu.util.HasCSRConst
 import difftest._
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
+  override def shouldBeInlined: Boolean = false
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
@@ -393,26 +394,26 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       difftest_ptw_addr(mem.a.bits.source) := mem.a.bits.address
     }
 
-    val difftest = Module(new DifftestRefillEvent)
-    difftest.io.clock := clock
-    difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
-    difftest.io.cacheid := 2.U
-    difftest.io.valid := cache.io.refill.valid
-    difftest.io.addr := difftest_ptw_addr(RegNext(mem.d.bits.source))
-    difftest.io.data := refill_data.asTypeOf(difftest.io.data)
+    val difftest = DifftestModule(new DiffRefillEvent)
+    difftest.clock := clock
+    difftest.coreid := p(XSCoreParamsKey).HartId.asUInt
+    difftest.index := 2.U
+    difftest.valid := cache.io.refill.valid
+    difftest.addr := difftest_ptw_addr(RegNext(mem.d.bits.source))
+    difftest.data := refill_data.asTypeOf(difftest.data)
   }
 
   if (env.EnableDifftest) {
     for (i <- 0 until PtwWidth) {
-      val difftest = Module(new DifftestL2TLBEvent)
+      val difftest = DifftestModule(new DifftestL2TLBEvent)
       difftest.io.clock := clock
       difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
       difftest.io.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.s1.af && !io.tlb(i).resp.bits.s2.gaf
       difftest.io.index := i.U
       difftest.io.vpn := Cat(io.tlb(i).resp.bits.s1.entry.tag, 0.U(sectortlbwidth.W))
       for (j <- 0 until tlbcontiguous) {
-        difftest.io.ppn(j) := Cat(io.tlb(i).resp.bits.s1.entry.ppn, io.tlb(i).resp.bits.s1.ppn_low(j))
-        difftest.io.valididx(j) := io.tlb(i).resp.bits.s1.valididx(j)
+        difftest.ppn(j) := Cat(io.tlb(i).resp.bits.s1.entry.ppn, io.tlb(i).resp.bits.s1.ppn_low(j))
+        difftest.valididx(j) := io.tlb(i).resp.bits.s1.valididx(j)
         difftest.io.pteidx(j) := io.tlb(i).resp.bits.s1.pteidx(j)
       }
       difftest.io.perm := io.tlb(i).resp.bits.s1.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
@@ -778,6 +779,7 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 }
 
 class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
   val useSoftPTW = coreParams.softPTW
   val node = if (!useSoftPTW) TLIdentityNode() else null
   val ptw = if (!useSoftPTW) LazyModule(new L2TLB()) else null

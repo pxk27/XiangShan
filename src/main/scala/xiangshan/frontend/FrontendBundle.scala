@@ -436,6 +436,8 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   // val call_is_rvc = Bool()
   val hit = Bool()
 
+  val predCycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
+
   def br_slot_valids = slot_valids.init
   def tail_slot_valid = slot_valids.last
 
@@ -512,9 +514,14 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
 
   def taken = br_taken_mask.reduce(_||_) || slot_valids.last // || (is_jal || is_jalr)
 
-  def fromFtbEntry(entry: FTBEntry, pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
+  def fromFtbEntry(
+                    entry: FTBEntry,
+                    pc: UInt,
+                    last_stage_pc: Option[Tuple2[UInt, Bool]] = None,
+                    last_stage_entry: Option[Tuple2[FTBEntry, Bool]] = None
+                  ) = {
     slot_valids := entry.brSlots.map(_.valid) :+ entry.tailSlot.valid
-    targets := entry.getTargetVec(pc)
+    targets := entry.getTargetVec(pc, last_stage_pc) // Use previous stage pc for better timing
     jalr_target := targets.last
     offsets := entry.getOffsetVec
     is_jal := entry.tailSlot.valid && entry.isJal
@@ -523,11 +530,12 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     is_ret := entry.tailSlot.valid && entry.isRet
     last_may_be_rvi_call := entry.last_may_be_rvi_call
     is_br_sharing := entry.tailSlot.valid && entry.tailSlot.sharing
+    predCycle.map(_ := GTimer())
     
     val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))
     val endLowerwithCarry = Cat(entry.carry, entry.pftAddr)
     fallThroughErr := startLower >= endLowerwithCarry
-    fallThroughAddr := Mux(fallThroughErr, pc + (FetchWidth * 4).U, entry.getFallThrough(pc))
+    fallThroughAddr := Mux(fallThroughErr, pc + (FetchWidth * 4).U, entry.getFallThrough(pc, last_stage_entry))
   }
 
   def display(cond: Bool): Unit = {
