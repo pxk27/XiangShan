@@ -395,7 +395,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val vssip_Mask = (1 << 2).U(XLEN.W)
 
   val mipWMask = vssip_Mask | ((1 << 9) | (1 << 5) | (1 << 1)).U(XLEN.W)
-  val mieWMask = mip_mie_WMask_H | ((1 << 11) | (1 << 9) | (1 << 7) | (1 << 5) | (1 << 3) | (1 << 1)).U(XLEN.W)
+  val mieWMask = mip_mie_WMask_H | "haaa".U(XLEN.W)
 
   def getMisaMxl(mxl: BigInt): BigInt = mxl << (XLEN - 2)
   def getMisaExt(ext: Char): Long = 1 << (ext.toInt - 'a'.toInt)
@@ -813,7 +813,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Misa, misa, 0.U, MaskedRegMap.Unwritable), // now whole misa is unchangeable
     MaskedRegMap(Medeleg, medeleg, medelegWMask),
     MaskedRegMap(Mideleg, mideleg, midelegWMask),
-    MaskedRegMap(Mie, mie, "haaa".U(XLEN.W)),
+    MaskedRegMap(Mie, mie, mieWMask),
     MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
     MaskedRegMap(Mcounteren, mcounteren),
 
