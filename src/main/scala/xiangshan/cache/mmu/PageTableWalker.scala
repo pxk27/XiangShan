@@ -88,9 +88,9 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val sfence = io.sfence
   val mem = io.mem
   val req_s2xlate = Reg(UInt(2.W))
-  val enableS2xlate = io.req.bits.req_info.s2xlate =/= noS2xlate
-  val onlyS1xlate = io.req.bits.req_info.s2xlate === onlyStage1
-  val onlyS2xlate = io.req.bits.req_info.s2xlate === onlyStage2
+  val enableS2xlate = req_s2xlate =/= noS2xlate
+  val onlyS1xlate = req_s2xlate === onlyStage1
+  val onlyS2xlate = req_s2xlate === onlyStage2
 
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
   val hgatp = io.csr.hgatp
@@ -181,7 +181,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     vpn := io.req.bits.req_info.vpn
     l1Hit := req.l1Hit
     accessFault := false.B
-    s_pmp_check := false.B
     idle := false.B
     hptw_pageFault := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
@@ -654,19 +653,18 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val levelNext = level + 1.U
   val l1Hit = Reg(Bool())
   val l2Hit = Reg(Bool())
-  val ppn = Reg(UInt(ppnLen.W))
   val pg_base = MakeGAddr(hgatp.ppn, getGVpnn(vpn, 2.U))
 //  val pte = io.mem.resp.bits.MergeRespToPte()
   val pte = io.mem.resp.bits.asTypeOf(new PteBundle().cloneType)
-  val p_pte = MakeAddr(ppn, getVpnn(vpn, 2.U - level))
+  val p_pte = MakeAddr(pte.ppn, getVpnn(vpn, 2.U - level))
   val mem_addr = Mux(level === 0.U, pg_base, p_pte)
 
   //s/w register
   val s_pmp_check = RegInit(true.B)
   val s_mem_req = RegInit(true.B)
   val w_mem_resp = RegInit(true.B)
-  val mem_addr_update = RegInit(true.B)
   val idle = RegInit(true.B)
+  val mem_addr_update = RegInit(false.B)
   val finish = WireInit(false.B)
 
   val sent_to_pmp = !idle && (!s_pmp_check || mem_addr_update) && !finish
@@ -732,7 +730,6 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 
   when(io.mem.resp.fire() && !w_mem_resp){
-    ppn := pte.ppn
     w_mem_resp := true.B
     mem_addr_update := true.B
   }
