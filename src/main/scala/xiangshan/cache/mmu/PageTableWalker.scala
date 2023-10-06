@@ -154,7 +154,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.resp.valid := Mux(stage1Hit, stageHit_resp, normal_resp)
   io.resp.bits.source := source
   io.resp.bits.resp := Mux(stage1Hit, stage1, ptw_resp)
-  io.resp.bits.h_resp := io.hptw.resp.bits.h_resp
+  io.resp.bits.h_resp := hptw_resp
   io.resp.bits.s2xlate := req_s2xlate
 
   io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault
@@ -172,7 +172,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
   mem.req.bits.id := FsmReqID.U(bMemID.W)
 
-  io.refill.req_info.s2xlate := req_s2xlate
+  io.refill.req_info.s2xlate := onlyStage1 // ptw refill the pte of stage 1
   io.refill.req_info.vpn := vpn
   io.refill.level := level
   io.refill.req_info.source := source
@@ -184,6 +184,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (io.req.fire() && io.req.bits.stage1Hit){
     idle := false.B
+    req_s2xlate := io.req.bits.req_info.s2xlate
     s_hptw_req := false.B
     hptw_resp_stage2 := false.B
   }
@@ -607,6 +608,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.mem.req.bits.id := mem_arb.io.chosen
   mem_arb.io.out.ready := io.mem.req.ready
   io.mem.refill := entries(RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))).req_info
+  io.mem.refill.s2xlate := onlyStage1 // llptw refill the pte of stage 1 
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 
