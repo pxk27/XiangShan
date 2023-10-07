@@ -295,7 +295,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     for (i <- 0 until l2tlbParams.l1Size) {
       XSDebug(stageReq.fire, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(vpn_search, Mux(h_search =/= noS2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid), io.csr_dup(0).hgatp.asid, s2xlate = h_search =/= noS2xlate)}\n")
     }
-    XSDebug(stageReq.fire, p"[l1] l1v:${Binary(l1v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
+    XSDebug(stageReq.fire, p"[l1] l1v:${Binary(l1v)} h_search:${Binary(h_search)} l1h:${l1h} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
     XSDebug(stageDelay(0).valid, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitPPN)} hitVec:${VecInit(hitVec).asUInt}\n")
 
     VecInit(hitVecT).suggestName(s"l1_hitVecT")
@@ -333,6 +333,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
+    val hVec = RegEnable(hVec_delay, stageDelay(1).fire).asUInt()
 
     val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
@@ -352,7 +353,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l2AccessPerf.zip(hitVec).map{ case (l, h) => l := h && stageCheck_valid_1cycle }
     XSDebug(stageDelay_valid_1cycle, p"[l2] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until l2tlbParams.l2nWays) {
-      XSDebug(stageCheck_valid_1cycle, p"[l2] ramDatas(${i.U}) ${ramDatas(i)}  l2v:${vVec(i)}  hit:${hit}\n")
+      XSDebug(stageCheck_valid_1cycle, p"[l2] ramDatas(${i.U}) ${ramDatas(i)}  l2v:${vVec(i)}  l2h:${hVec(i)}  hit:${hit}\n")
     }
     XSDebug(stageCheck_valid_1cycle, p"[l2] l2Hit:${hit} l2HitPPN:0x${Hexadecimal(hitWayData.ppns(genPtwL2SectorIdx(check_vpn)))} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${vVec}\n")
 
@@ -385,6 +386,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
+    val hVec = RegEnable(hVec_delay, stageDelay(1).fire).asUInt()
 
     val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
@@ -399,7 +401,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l3AccessPerf.zip(hitVec).map{ case (l, h) => l := h && stageCheck_valid_1cycle }
     XSDebug(stageReq.fire, p"[l3] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until l2tlbParams.l3nWays) {
-      XSDebug(stageCheck_valid_1cycle, p"[l3] ramDatas(${i.U}) ${ramDatas(i)}  l3v:${vVec(i)}  hit:${hitVec(i)}\n")
+      XSDebug(stageCheck_valid_1cycle, p"[l3] ramDatas(${i.U}) ${ramDatas(i)}  l3v:${vVec(i)}  l3h:${hVec(i)}  hit:${hitVec(i)}\n")
     }
     XSDebug(stageCheck_valid_1cycle, p"[l3] l3Hit:${hit} l3HitData:${hitWayData} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} v:${vVec}\n")
 
@@ -551,7 +553,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
 
     XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(refill.req_info_dup(0).vpn, io.csr_dup(0).satp.asid, memSelData(0), 0.U, prefetch = refill_prefetch_dup(0))}\n")
-    XSDebug(p"[l1 refill] l1v:${Binary(l1v)}->${Binary(l1v | rfOH)} l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
+    XSDebug(p"[l1 refill] l1v:${Binary(l1v)} -> ${Binary(l1v | rfOH)}\n")
+    XSDebug(p"[l1 refill] l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
+    XSDebug(p"[l1 refill] l1h:${Binary(l1h(refillIdx))} -> ${Binary(refill.req_info_dup(0).s2xlate)}\n")
 
     refillIdx.suggestName(s"l1_refillIdx")
     rfOH.suggestName(s"l1_rfOH")
@@ -590,6 +594,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     XSDebug(p"[l2 refill] refilldata:0x${wdata}\n")
     XSDebug(p"[l2 refill] l2v:${Binary(l2v)} -> ${Binary(l2v | rfvOH)}\n")
     XSDebug(p"[l2 refill] l2g:${Binary(l2g)} -> ${Binary(l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
+    XSDebug(p"[l2 refill] l2h:${Binary(l2h(refillIdx)(victimWay))} -> ${Binary(refill.req_info_dup(1).s2xlate)}\n")
 
     refillIdx.suggestName(s"l2_refillIdx")
     victimWay.suggestName(s"l2_victimWay")
@@ -630,6 +635,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     XSDebug(p"[l3 refill] refilldata:0x${wdata}\n")
     XSDebug(p"[l3 refill] l3v:${Binary(l3v)} -> ${Binary(l3v | rfvOH)}\n")
     XSDebug(p"[l3 refill] l3g:${Binary(l3g)} -> ${Binary(l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
+    XSDebug(p"[l3 refill] l3h:${Binary(l3h(refillIdx)(victimWay))} -> ${Binary(refill.req_info_dup(2).s2xlate)}\n")
 
     refillIdx.suggestName(s"l3_refillIdx")
     victimWay.suggestName(s"l3_victimWay")
@@ -661,7 +667,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
 
     XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(refill.req_info_dup(0).vpn, io.csr_dup(0).satp.asid, memSelData(0), refill.level_dup(0), refill_prefetch_dup(0))}\n")
-    XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
+    XSDebug(p"[sp refill] spv:${Binary(spv)} -> ${Binary(spv | rfOH)}\n")
+    XSDebug(p"[sp refill] spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
+    XSDebug(p"[sp refill] sph:${Binary(sph(refillIdx))} -> ${Binary(refill.req_info_dup(0).s2xlate)}\n")
 
     refillIdx.suggestName(s"sp_refillIdx")
     rfOH.suggestName(s"sp_rfOH")
