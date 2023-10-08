@@ -170,7 +170,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp_gpa_refill := true.B
     }
 
-    when (hasGpf(i) && resp_gpa_refill && need_gpa_vpn === get_pn(req_in(i).bits.vaddr)){
+    when (hasGpf(i) && resp_gpa_refill && need_gpa_vpn_hit){
       need_gpa := false.B
     }
     
@@ -192,7 +192,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     for (d <- 0 until nRespDups) {
       ppn(d) := Mux(p_hit, p_ppn, e_ppn(d))
       perm(d) := Mux(p_hit, p_perm, e_perm(d))
-      gvpn(d) :=  need_gpa_gvpn
+      gvpn(d) :=  Mux(hasGpf(i), need_gpa_gvpn, 0.U)
       g_perm(d) := Mux(p_hit, p_g_perm, e_g_perm(d))
       r_s2xlate(d) := Mux(p_hit, p_s2xlate, e_s2xlate(d))
       val paddr = Cat(ppn(d), get_off(req_out(i).vaddr))
@@ -252,6 +252,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     val fault_valid = s1_valid || s2_valid
 
+    // when pf and gpf can't happens simultaneously
+    val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af
     resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && s1_valid && !af
     resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && s1_valid && !af
     resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && s1_valid && !af
@@ -259,9 +261,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
 
-    resp(idx).bits.excp(nDups).gpf.ld := (ldGpf || g_ldUpdate) && s2_valid && !af
-    resp(idx).bits.excp(nDups).gpf.st := (stGpf || g_stUpdate) && s2_valid && !af
-    resp(idx).bits.excp(nDups).gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af
+    resp(idx).bits.excp(nDups).gpf.ld := (ldGpf || g_ldUpdate) && s2_valid && !af && !hasPf
+    resp(idx).bits.excp(nDups).gpf.st := (stGpf || g_stUpdate) && s2_valid && !af && !hasPf
+    resp(idx).bits.excp(nDups).gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af && !hasPf
 
     resp(idx).bits.excp(nDups).af.ld    := af && TlbCmd.isRead(cmd) && fault_valid
     resp(idx).bits.excp(nDups).af.st    := af && TlbCmd.isWrite(cmd) && fault_valid
@@ -283,9 +285,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       (vsatp.mode === 0.U) -> onlyStage2,
       (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
-    val ptw_s2xlate = ptw.resp.bits.s2xlate =/= noS2xlate
+    val ptw_s2xlate = ptw.resp.bits.s2xlate
+    val has_s2xlate = ptw_s2xlate =/= noS2xlate
     val onlyS2 = ptw_s2xlate === onlyStage2
-    val ptw_s1_hit = ptw.resp.bits.s1.hit(get_pn(req_out(idx).vaddr), Mux(ptw_s2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, true, false, ptw_s2xlate)
+    val ptw_s1_hit = ptw.resp.bits.s1.hit(get_pn(req_out(idx).vaddr), Mux(has_s2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, true, false, has_s2xlate)
     val ptw_s2_hit = ptw.resp.bits.s2.hit(get_pn(req_out(idx).vaddr), io.csr.hgatp.asid)
     val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw_s2xlate && Mux(onlyS2, ptw_s2_hit, ptw_s1_hit)
     io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && (missVec(idx)) && !ptw_just_back, false.B) // TODO: remove the regnext, timing
