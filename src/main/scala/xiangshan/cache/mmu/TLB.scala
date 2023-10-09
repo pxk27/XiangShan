@@ -95,6 +95,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     (vsatp.mode === 0.U) -> onlyStage2,
     (hgatp.mode === 0.U) -> onlyStage1
   )))
+  val need_gpa = RegInit(false.B)
+  val need_gpa_vpn = Reg(UInt(vpnLen.W))
+  val need_gpa_gvpn = Reg(UInt(vpnLen.W))
+  val hasGpf = Wire(Vec(Width, Bool()))
 
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   val vmEnable = (0 until Width).map(i => if (EnbaleTlbDebug) (satp.mode === 8.U)
@@ -103,7 +107,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegNext(!req(i).bits.no_translate))
 
 
-  val refill = (0 until Width).map(i => ptw.resp.fire() && !flush_mmu && (vmEnable(i) || ptw.resp.bits.s2xlate =/= noS2xlate))
+  val refill = (0 until Width).map(i => ptw.resp.fire() && !(need_gpa && need_gpa_vpn === ptw.resp.bits.getVpn) && !flush_mmu && (vmEnable(i) || ptw.resp.bits.s2xlate =/= noS2xlate))
   refill_to_mem := DontCare
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, satp)
@@ -114,10 +118,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
     resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
   }
-  val need_gpa = RegInit(false.B)
-  val need_gpa_vpn = Reg(UInt(vpnLen.W))
-  val need_gpa_gvpn = Reg(UInt(vpnLen.W))
-  val hasGpf = Wire(Vec(Width, Bool()))
+  
   // read TLB, get hit/miss, paddr, perm bits
   val readResult = (0 until Width).map(TLBRead(_))
   val hitVec = readResult.map(_._1)
@@ -217,12 +218,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val af = perm.af || (hasS2xlate && g_perm.af)
 
     // Stage 1 perm check
-    val pf = perm.pf || (hlvx && !perm.x)
+    val pf = perm.pf
     val ldUpdate = !perm.a && TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) // update A/D through exception
     val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) // update A/D through exception
     val instrUpdate = !perm.a && TlbCmd.isExec(cmd) // update A/D through exception
     val modeCheck = !(mode(idx) === ModeU && !perm.u || mode(idx) === ModeS && perm.u && (!sum(idx) || ifecth))
-    val ldPermFail = !(modeCheck && (perm.r || mxr(idx) && perm.x))
+    val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || mxr(idx) && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
@@ -231,11 +232,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val s1_valid = portTranslateEnable(idx) && !onlyS2
 
     // Stage 2 perm check
-    val gpf = g_perm.pf || (hlvx && !g_perm.x)
+    val gpf = g_perm.pf
     val g_ldUpdate = !g_perm.a && TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)
     val g_stUpdate = (!g_perm.a || !g_perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val g_instrUpdate = !g_perm.a && TlbCmd.isExec(cmd)
-    val g_ldPermFail = !(g_perm.r || io.csr.priv.mxr && g_perm.x)
+    val g_ldPermFail = !Mux(hlvx, g_perm.x, (g_perm.r || io.csr.priv.mxr && g_perm.x))
     val g_stPermFail = !g_perm.w
     val g_instrPermFail = !g_perm.x
     val ldGpf = (g_ldPermFail || gpf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
