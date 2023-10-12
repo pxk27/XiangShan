@@ -1071,7 +1071,7 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     val hit0 = entry.tag(vpnLen - 1, vpnnLen * 2) === gvpn(vpnLen - 1, vpnnLen * 2)
     val hit1 = entry.tag(vpnnLen * 2  - 1, vpnnLen) === gvpn(vpnnLen * 2 - 1, vpnnLen)
     val hit2 = entry.tag(vpnnLen - 1, 0) === gvpn(vpnnLen - 1, 0)
-    vmid_hit && Mux(entry.level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(entry.level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0))
+    vmid_hit && hit2 && hit1 && hit0 // Because we only use it when onlyStage2, tags are required to be all matched.
   }
 }
 
