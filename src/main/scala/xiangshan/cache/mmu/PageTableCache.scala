@@ -555,7 +555,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(refill.req_info_dup(0).vpn, io.csr_dup(0).satp.asid, memSelData(0), 0.U, prefetch = refill_prefetch_dup(0))}\n")
     XSDebug(p"[l1 refill] l1v:${Binary(l1v)} -> ${Binary(l1v | rfOH)}\n")
-    XSDebug(p"[l1 refill] l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
+    XSDebug(p"[l1 refill] l1g:${Binary(l1g)} -> ${Binary((l1g & ~rfOH) | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
     XSDebug(p"[l1 refill] l1h:${Binary(l1h(refillIdx))} -> ${Binary(refill.req_info_dup(0).s2xlate)}\n")
 
     refillIdx.suggestName(s"l1_refillIdx")

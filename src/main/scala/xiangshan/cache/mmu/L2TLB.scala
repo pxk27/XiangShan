@@ -109,6 +109,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     val id = UInt(log2Up(l2tlbParams.llptwsize).W)
     val source = UInt(bSourceWidth.W)
     val gvpn = UInt(vpnLen.W)
+    val s2xlate = UInt(2.W)
   }, 2))
   val hptw_resp_arb = Module(new Arbiter(new Bundle {
     val resp = new HptwResp()
@@ -135,12 +136,14 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   hptw_req_arb.io.in(InHptwArbPTWPort).bits.gvpn := ptw.io.hptw.req.bits.gvpn
   hptw_req_arb.io.in(InHptwArbPTWPort).bits.id := ptw.io.hptw.req.bits.id
   hptw_req_arb.io.in(InHptwArbPTWPort).bits.source := ptw.io.hptw.req.bits.source
+  hptw_req_arb.io.in(InHptwArbPTWPort).bits.s2xlate := ptw.io.hptw.req.bits.s2xlate
   ptw.io.hptw.req.ready := hptw_req_arb.io.in(InHptwArbPTWPort).ready
 
   hptw_req_arb.io.in(InHptwArbLLPTWPort).valid := llptw.io.hptw.req.valid
   hptw_req_arb.io.in(InHptwArbLLPTWPort).bits.gvpn := llptw.io.hptw.req.bits.gvpn
   hptw_req_arb.io.in(InHptwArbLLPTWPort).bits.id := llptw.io.hptw.req.bits.id
   hptw_req_arb.io.in(InHptwArbLLPTWPort).bits.source := llptw.io.hptw.req.bits.source
+  hptw_req_arb.io.in(InHptwArbLLPTWPort).bits.s2xlate := llptw.io.hptw.req.bits.s2xlate
   llptw.io.hptw.req.ready := hptw_req_arb.io.in(InHptwArbLLPTWPort).ready
 
   // arb2 input port
@@ -168,7 +171,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   arb2.io.in(InArbHPTWPort).valid := hptw_req_arb.io.out.valid
   arb2.io.in(InArbHPTWPort).bits.vpn := hptw_req_arb.io.out.bits.gvpn
-  arb2.io.in(InArbHPTWPort).bits.s2xlate := onlyStage2
+  arb2.io.in(InArbHPTWPort).bits.s2xlate := hptw_req_arb.io.out.bits.s2xlate
   arb2.io.in(InArbHPTWPort).bits.source := hptw_req_arb.io.out.bits.source
   hptw_req_arb.io.out.ready := arb2.io.in(InArbHPTWPort).ready
   if (l2tlbParams.enablePrefetch) {
@@ -247,7 +250,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.csr := csr_dup(6)
   ptw.io.resp.ready := outReady(ptw.io.resp.bits.source, outArbFsmPort)
 
-  hptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.bypassed & cache.io.resp.bits.isHptw
+  hptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.bypassed && cache.io.resp.bits.isHptw
   hptw.io.req.bits.gvpn := cache.io.resp.bits.req_info.vpn
   hptw.io.req.bits.id := cache.io.resp.bits.toHptw.id
   hptw.io.req.bits.source := cache.io.resp.bits.req_info.source

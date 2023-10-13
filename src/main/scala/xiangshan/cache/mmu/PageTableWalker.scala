@@ -63,6 +63,7 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
       val source = UInt(bSourceWidth.W)
       val id = UInt(log2Up(l2tlbParams.llptwsize).W)
       val gvpn = UInt(vpnLen.W)
+      val s2xlate = UInt(2.W)
     })
     val resp = Flipped(Valid(new Bundle {
       val h_resp = Output(new HptwResp)
@@ -93,11 +94,11 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val enableS2xlate = req_s2xlate =/= noS2xlate
   val onlyS1xlate = req_s2xlate === onlyStage1
   val onlyS2xlate = req_s2xlate === onlyStage2
+  val hasS2xlate = enableS2xlate && !onlyS1xlate
 
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
   val hgatp = io.csr.hgatp
   val flush = io.sfence.valid || satp.changed
-  val s2xlate = enableS2xlate && !onlyS1xlate
   val level = RegInit(0.U(log2Up(Level).W))
   val af_level = RegInit(0.U(log2Up(Level).W)) // access fault return this level
   val ppn = Reg(UInt(ppnLen.W))
@@ -168,15 +169,15 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.llptw.bits.ppn := DontCare
 
   io.pmp.req.valid := DontCare // samecycle, do not use valid
-  io.pmp.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
+  io.pmp.req.bits.addr := Mux(hasS2xlate, hpaddr, mem_addr)
   io.pmp.req.bits.size := 3.U // TODO: fix it
   io.pmp.req.bits.cmd := TlbCmd.read
 
   mem.req.valid := s_mem_req === false.B && !mem.mask && !accessFault && s_pmp_check
-  mem.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
+  mem.req.bits.addr := Mux(hasS2xlate, hpaddr, mem_addr)
   mem.req.bits.id := FsmReqID.U(bMemID.W)
 
-  io.refill.req_info.s2xlate := Mux(enableS2xlate, onlyStage1, req_s2xlate) // ptw refill the pte of stage 1 when s2xlate is enabled
+  io.refill.req_info.s2xlate := Mux(enableS2xlate, onlyStage1, noS2xlate) // ptw refill the pte of stage 1 when s2xlate is enabled
   io.refill.req_info.vpn := vpn
   io.refill.level := level
   io.refill.req_info.source := source
@@ -185,6 +186,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
   io.hptw.req.bits.gvpn := get_pn(gpaddr)
   io.hptw.req.bits.source := source
+  io.hptw.req.bits.s2xlate := req_s2xlate
 
   when (io.req.fire() && io.req.bits.stage1Hit){
     idle := false.B
@@ -284,7 +286,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when(mem_addr_update){
     when(level === 0.U && !(find_pte || accessFault)){
       level := levelNext
-      when(s2xlate){
+      when(hasS2xlate){
         s_hptw_req := false.B
       }.otherwise{
         s_mem_req := false.B
@@ -299,7 +301,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         last_s2xlate := false.B
       }
       finish := true.B
-    }.elsewhen(s2xlate && last_s2xlate === true.B) {
+    }.elsewhen(hasS2xlate && last_s2xlate === true.B) {
       s_last_hptw_req := false.B
       mem_addr_update := false.B
     }.elsewhen(io.resp.valid){
@@ -398,6 +400,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
       val source = UInt(bSourceWidth.W)
       val id = UInt(log2Up(l2tlbParams.llptwsize).W)
       val gvpn = UInt(vpnLen.W)
+      val s2xlate = UInt(2.W)
     })
     val resp = Flipped(Valid(new Bundle {
       val id = Output(UInt(log2Up(l2tlbParams.llptwsize).W))
@@ -611,6 +614,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.hptw.req.bits.gvpn := Mux(hyper_arb1.io.out.valid, hptw_req_gvpn_1, hptw_req_gvpn_2)
   io.hptw.req.bits.id := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.chosen, hyper_arb2.io.chosen)
   io.hptw.req.bits.source := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.req_info.source, hyper_arb2.io.out.bits.req_info.source)
+  io.hptw.req.bits.s2xlate := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.req_info.s2xlate, hyper_arb2.io.out.bits.req_info.s2xlate)
   hyper_arb1.io.out.ready := io.hptw.req.ready
   hyper_arb2.io.out.ready := io.hptw.req.ready
 
