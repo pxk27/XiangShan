@@ -147,11 +147,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw.io.hptw.req.ready := hptw_req_arb.io.in(InHptwArbLLPTWPort).ready
 
   // arb2 input port
-  val InArbPTWPort = 0
-  val InArbMissQueuePort = 1
-  val InArbTlbPort = 2
-  val InArbPrefetchPort = 3
-  val InArbHPTWPort = 4
+  val InArbPTWPort       = 0
+  val InArbHPTWPort      = 1
+  val InArbMissQueuePort = 2
+  val InArbTlbPort       = 3
+  val InArbPrefetchPort  = 4
+
   // NOTE: when cache out but miss and ptw doesnt accept,
   arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
  
