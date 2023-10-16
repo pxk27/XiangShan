@@ -63,7 +63,6 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
       val source = UInt(bSourceWidth.W)
       val id = UInt(log2Up(l2tlbParams.llptwsize).W)
       val gvpn = UInt(vpnLen.W)
-      val s2xlate = UInt(2.W)
     })
     val resp = Flipped(Valid(new Bundle {
       val h_resp = Output(new HptwResp)
@@ -186,7 +185,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
   io.hptw.req.bits.gvpn := get_pn(gpaddr)
   io.hptw.req.bits.source := source
-  io.hptw.req.bits.s2xlate := req_s2xlate
 
   when (io.req.fire() && io.req.bits.stage1Hit){
     idle := false.B
@@ -400,7 +398,6 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
       val source = UInt(bSourceWidth.W)
       val id = UInt(log2Up(l2tlbParams.llptwsize).W)
       val gvpn = UInt(vpnLen.W)
-      val s2xlate = UInt(2.W)
     })
     val resp = Flipped(Valid(new Bundle {
       val id = Output(UInt(log2Up(l2tlbParams.llptwsize).W))
@@ -614,7 +611,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.hptw.req.bits.gvpn := Mux(hyper_arb1.io.out.valid, hptw_req_gvpn_1, hptw_req_gvpn_2)
   io.hptw.req.bits.id := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.chosen, hyper_arb2.io.chosen)
   io.hptw.req.bits.source := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.req_info.source, hyper_arb2.io.out.bits.req_info.source)
-  io.hptw.req.bits.s2xlate := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.req_info.s2xlate, hyper_arb2.io.out.bits.req_info.s2xlate)
   hyper_arb1.io.out.ready := io.hptw.req.ready
   hyper_arb2.io.out.ready := io.hptw.req.ready
 
