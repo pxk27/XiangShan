@@ -16,22 +16,16 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
-import chisel3.experimental.chiselName
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
-import firrtl.stage.RunFirrtlTransformAnnotation
-import firrtl.transforms.RenameModules
-import freechips.rocketchip.transforms.naming.RenameDesiredNames
 
 import scala.math.min
 import scala.util.matching.Regex
 import scala.{Tuple2 => &}
-import firrtl.passes.wiring.Wiring
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
 
@@ -142,7 +136,7 @@ class FakeITTageTable()(implicit p: Parameters) extends ITTageModule {
   io.resp := DontCare
 
 }
-@chiselName
+
 class ITTageTable
 (
   val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int, val tableIdx: Int
@@ -219,7 +213,7 @@ class ITTageTable
   val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.fire), RegEnable(s0_tag, io.req.fire))
   val s0_bank_req_1h = get_bank_mask(s0_idx)
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
-  
+
   val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
   // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
   val table_banks = Seq.fill(nBanks)(
@@ -285,7 +279,7 @@ class ITTageTable
   update_wdata.tag   := update_tag
   // only when ctr is null
   update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
-  
+
   val newValidArray = VecInit(validArray.asBools)
   when (io.update.valid) {
     newValidArray(update_idx) := true.B
@@ -355,8 +349,8 @@ class FakeITTage(implicit p: Parameters) extends BaseITTage {
   io.s1_ready := true.B
   io.s2_ready := true.B
 }
+
 // TODO: check target related logics
-@chiselName
 class ITTage(implicit p: Parameters) extends BaseITTage {
   override val meta_size = 0.U.asTypeOf(new ITTageMeta).getWidth
 
@@ -380,9 +374,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s1_resps = VecInit(tables.map(t => t.io.resp))
   val s2_resps = RegEnable(s1_resps, io.s1_fire(3))
 
-  val debug_pc_s1 = RegEnable(s0_pc_dup(3), enable=io.s0_fire(3))
-  val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire(3))
-  val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s2_fire(3))
+  val debug_pc_s1 = RegEnable(s0_pc_dup(3), io.s0_fire(3))
+  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(3))
+  val debug_pc_s3 = RegEnable(debug_pc_s2, io.s2_fire(3))
 
   val s2_tageTaken         = Wire(Bool())
   val s2_tageTarget        = Wire(UInt(VAddrBits.W))
@@ -463,10 +457,10 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val providerInfo = selectedInfo.first
   val altProviderInfo = selectedInfo.second
   val providerNull = providerInfo.ctr === 0.U
-  
+
   val basePred   = true.B
   val baseTarget = io.in.bits.resp_in(0).s2.full_pred(3).jalr_target // use ftb pred as base target
-  
+
   s2_tageTaken := Mux1H(Seq(
     (provided && !(providerNull && altProvided), true.B),
     (altProvided && providerNull, true.B),
