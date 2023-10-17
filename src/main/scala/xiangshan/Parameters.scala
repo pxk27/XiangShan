@@ -16,7 +16,7 @@
 
 package xiangshan
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.exu._
@@ -76,8 +76,8 @@ case class XSCoreParameters
   EnableCommitGHistDiff: Boolean = true,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
-  RasSize: Int = 32,
-  RasSpecSize: Int = 64,
+  RasSize: Int = 16,
+  RasSpecSize: Int = 32,
   RasCtrSize: Int = 8,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
@@ -255,7 +255,6 @@ case class XSCoreParameters
     nProbeEntries = 2,
     nPrefetchEntries = 12,
     nPrefBufferEntries = 32,
-    hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -446,6 +445,8 @@ trait HasXSParameter {
   val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt
   val NRFpReadPorts = 3 * exuParameters.FmacCnt + exuParameters.StuCnt
   val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
+  val NumRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
+  val BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth

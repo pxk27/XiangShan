@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -278,7 +278,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // TODO: add assertions:
     // 1. add a replay delay counter?
     // 2. when req gets into MissQueue, it should not miss any more
-    when(io.dcache.resp.fire()) {
+    when(io.dcache.resp.fire) {
       when(io.dcache.resp.bits.miss) {
         when(io.dcache.resp.bits.replay) {
           state := s_cache_req
@@ -443,7 +443,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)
-    difftest.clock  := clock
     difftest.coreid := io.hartId
     difftest.valid  := state === s_cache_resp_latch
     difftest.addr   := paddr_reg
@@ -456,7 +455,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     val uop = io.out.bits.uop
     val difftest = DifftestModule(new DiffLrScEvent)
-    difftest.clock := clock
     difftest.coreid := io.hartId
     difftest.valid := io.out.fire &&
       (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w)

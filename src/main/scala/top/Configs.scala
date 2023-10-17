@@ -22,7 +22,7 @@ import xiangshan._
 import utils._
 import utility._
 import system._
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
@@ -105,9 +105,9 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMissEntries = 2,
           nReleaseEntries = 1,
           nProbeEntries = 2,
-          nPrefetchEntries = 2,
-          nPrefBufferEntries = 32,
-          hasPrefetch = true
+          // fdip
+          enableICachePrefetch = true,
+          prefetchToL1 = false,
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache

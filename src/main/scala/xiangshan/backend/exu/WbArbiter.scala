@@ -16,7 +16,7 @@
 
 package xiangshan.backend.exu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import difftest._
@@ -262,10 +262,10 @@ class WbArbiterWrapper(
   }
   override lazy val writebackSourceImp: HasWritebackSourceImp = module
 
-  lazy val module = new LazyModuleImp(this)
+  class WbArbiterWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper)
     with HasXSParameter with HasWritebackSourceImp with HasExuWbHelper {
 
-    val io = IO(new Bundle() {
+    val io = IO(new Bundle {
       val hartId = Input(UInt(8.W))
       val redirect = Flipped(ValidIO(new Redirect))
       val in = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput)))
@@ -307,7 +307,6 @@ class WbArbiterWrapper(
     if (env.EnableDifftest || env.AlwaysBasicDiff) {
       intArbiter.module.io.out.foreach(out => {
         val difftest = DifftestModule(new DiffIntWriteback(NRPhyRegs))
-        difftest.clock   := clock
         difftest.coreid  := io.hartId
         difftest.valid   := out.valid && out.bits.uop.ctrl.rfWen
         difftest.address := out.bits.uop.pdest
@@ -328,7 +327,6 @@ class WbArbiterWrapper(
     if (env.EnableDifftest || env.AlwaysBasicDiff) {
       fpArbiter.module.io.out.foreach(out => {
         val difftest = DifftestModule(new DiffFpWriteback(NRPhyRegs))
-        difftest.clock   := clock
         difftest.coreid  := io.hartId
         difftest.valid   := out.valid // all fp instr will write fp rf
         difftest.address := out.bits.uop.pdest
@@ -338,6 +336,8 @@ class WbArbiterWrapper(
 
     io.out <> intArbiter.module.io.out ++ fpArbiter.module.io.out
   }
+
+  lazy val module = new WbArbiterWrapperImp(this)
 }
 
 class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModule
@@ -353,7 +353,8 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
     module.io.in := sink._1.zip(sink._2).zip(sourceMod).flatMap(x => x._1._1.writebackSource1(x._2)(x._1._2))
   }
 
-  lazy val module = new LazyModuleImp(this)
+
+  class Wb2CtrlImp(wrapper: LazyModule) extends LazyModuleImp(wrapper)
     with HasWritebackSourceImp
     with HasXSParameter
   {
@@ -387,6 +388,8 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
 
     override def writebackSource: Option[Seq[Seq[ValidIO[ExuOutput]]]] = Some(Seq(io.out))
   }
+
+  lazy val module = new Wb2CtrlImp(this)
 
   override val writebackSourceParams: Seq[WritebackSourceParams] = {
     Seq(new WritebackSourceParams(configs.map(cfg => Seq(cfg))))

@@ -16,17 +16,14 @@
 
 package top
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
-import utility.FileRegisters
-import utility.ChiselDB
-import utility.GTimer
+import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
-import utility.Constantin
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -50,7 +47,7 @@ class SimTop(implicit p: Parameters) extends Module {
     dynamicLatency = debugOpts.UseDRAMSim
   )
   val simAXIMem = Module(l_simAXIMem.module)
-  l_simAXIMem.io_axi4 <> soc.memory
+  l_simAXIMem.io_axi4.getWrappedValue :<>= soc.memory.waiveAll
 
   soc.io.clock := clock.asBool
   soc.io.reset := reset.asAsyncReset
@@ -98,35 +95,28 @@ class SimTop(implicit p: Parameters) extends Module {
   dontTouch(logEnable)
   dontTouch(clean)
   dontTouch(dump)
-
-  // Check and dispaly all source and sink connections
-  ExcitingUtils.fixConnections()
-  ExcitingUtils.checkAndDisplay()
 }
 
 object SimTop extends App {
-  override def main(args: Array[String]): Unit = {
-    // Keep this the same as TopMain except that SimTop is used here instead of XSTop
-    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  // Keep this the same as TopMain except that SimTop is used here instead of XSTop
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
-    // tools: init to close dpi-c when in fpga
-    val envInFPGA = config(DebugOptionsKey).FPGAPlatform
-    val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
-    val enableConstantin = config(DebugOptionsKey).EnableConstantin
-    Constantin.init(enableConstantin && !envInFPGA)
-    ChiselDB.init(enableChiselDB && !envInFPGA)
+  // tools: init to close dpi-c when in fpga
+  val envInFPGA = config(DebugOptionsKey).FPGAPlatform
+  val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
+  val enableConstantin = config(DebugOptionsKey).EnableConstantin
+  Constantin.init(enableConstantin && !envInFPGA)
+  ChiselDB.init(enableChiselDB && !envInFPGA)
 
-    Generator.execute(
-      firrtlOpts,
-      DisableMonitors(p => new SimTop()(p))(config),
-      firrtlComplier,
-      firtoolOpts
-    )
+  Generator.execute(
+    firrtlOpts,
+    DisableMonitors(p => new SimTop()(p))(config),
+    firtoolOpts
+  )
 
-    // tools: write cpp files
-    ChiselDB.addToFileRegisters
-    Constantin.addToFileRegisters
-    FileRegisters.write(fileDir = "./build")
-    DifftestModule.finish("XiangShan")
-  }
+  // tools: write cpp files
+  ChiselDB.addToFileRegisters
+  Constantin.addToFileRegisters
+  FileRegisters.write(fileDir = "./build")
+  DifftestModule.finish("XiangShan")
 }

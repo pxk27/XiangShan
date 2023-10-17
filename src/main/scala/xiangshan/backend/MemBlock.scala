@@ -16,7 +16,7 @@
 
 package xiangshan.backend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
@@ -28,7 +28,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.exu.StdExeUnit
 import xiangshan.backend.fu._
-import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, RobLsqIO, RobPtr}
+import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, RobLsqIO, RobPtr, RobDebugRollingIO}
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.mem._
@@ -158,8 +158,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val vlsu2vec = new VLSU2VecIO
     val vlsu2int = new VLSU2IntIO
     val vlsu2ctrl = new VLSU2CtrlIO
-    // prefetch to l1 req
-    val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
     // misc
     val error = new L1CacheErrorInfo
     val memInfo = new Bundle {
@@ -168,7 +166,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val dcacheMSHRFull = Output(Bool())
     }
     val debug_ls = new DebugLSIO
-    val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2PfqBusy = Input(Bool())
 
@@ -176,13 +173,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
       val toCore = new MemCoreTopDownIO
     }
+    val debugRolling = Flipped(new RobDebugRollingIO)
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.mem_to_ooo.writeback))
 
   val redirect = RegNextWithEnable(io.redirect)
 
-  val dcache = outer.dcache.module
+  private val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
   val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
@@ -245,21 +243,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
-  // Atom inst comes from sta / std, then its result
-  // will be writebacked using load writeback port
-  //
-  // However, atom exception will be writebacked to rob
-  // using store writeback port
-
   val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
   val ldout0 = Wire(Decoupled(new ExuOutput))
   ldout0.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
   ldout0.bits  := loadWritebackOverride
   atomicsUnit.io.out.ready := ldout0.ready
   loadUnits.head.io.ldout.ready := ldout0.ready
-  when(atomicsUnit.io.out.valid){
-    ldout0.bits.uop.cf.exceptionVec := 0.U(24.W).asBools // exception will be writebacked via store wb port
-  }
 
   val ldExeWbReqs = ldout0 +: loadUnits.tail.map(_.io.ldout)
   io.mem_to_ooo.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
@@ -360,8 +349,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // ptw
   val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
   val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
-  val ptw = outer.ptw.module
-  val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  private val ptw = outer.ptw.module
+  private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
   ptw.io.csr.distribute_csr <> csrCtrl.distribute_csr
@@ -391,6 +381,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val ptwio = Wire(new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt + 2)) // load + store + hw prefetch
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
+  dtlb.map(_.hartId := io.hartId)
   dtlb.map(_.sfence := sfence)
   dtlb.map(_.csr := tlbcsr)
   dtlb.map(_.flushPipe.map(a => a := false.B)) // non-block doesn't need
@@ -427,7 +418,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       ptwio.req(i).bits := tlb.bits
     val vector_hit = if (refillBothTlb) Cat(ptw_resp_next.vector).orR
       else if (i < (exuParameters.LduCnt + 1)) Cat(ptw_resp_next.vector.take(exuParameters.LduCnt + 1)).orR
-      else if (i < (exuParameters.LduCnt + 1 + exuParameters.StuCnt)) Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1)).orR
+      else if (i < (exuParameters.LduCnt + 1 + exuParameters.StuCnt)) Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1).take(exuParameters.StuCnt)).orR
       else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + exuParameters.StuCnt + 1)).orR
     val hasS2xlate = tlb.bits.hasS2xlate()
     ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
@@ -723,7 +714,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // -------------------------
     // Store Triggers
     // -------------------------
-    when(stOut(i).fire()){
+    when(stOut(i).fire){
       val hit = Wire(Vec(3, Bool()))
       for (j <- 0 until 3) {
          hit(j) := !tdata(sTriggerMapping(j)).select && TriggerCmp(
@@ -754,13 +745,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.mmioStout.ready := true.B
   }
 
-  // atomic exception / trigger writeback
   when (atomicsUnit.io.out.valid) {
-    // atom inst will use store writeback port 0 to writeback exception info
-    stOut(0).valid := true.B
-    stOut(0).bits  := atomicsUnit.io.out.bits
-    assert(!lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid)
-
     // when atom inst writeback, surpress normal load trigger
     (0 until exuParameters.LduCnt).map(i => {
       io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
@@ -928,6 +913,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.debugTopDown.toCore.robHeadLoadVio := lsq.io.debugTopDown.robHeadLoadVio
   io.debugTopDown.toCore.robHeadLoadMSHR := lsq.io.debugTopDown.robHeadLoadMSHR
   dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
+  dcache.io.debugRolling := io.debugRolling
 
   val ldDeqCount = PopCount(io.ooo_to_mem.issue.take(exuParameters.LduCnt).map(_.valid))
   val stDeqCount = PopCount(io.ooo_to_mem.issue.drop(exuParameters.LduCnt).map(_.valid))

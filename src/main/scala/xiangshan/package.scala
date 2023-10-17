@@ -16,7 +16,7 @@
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile.XLen
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu._
@@ -103,20 +103,20 @@ package object xiangshan {
     def storeIsAMO(fuType: UInt) = fuType(1)
 
     val functionNameMap = Map(
-      jmp.litValue() -> "jmp",
-      i2f.litValue() -> "int_to_float",
-      csr.litValue() -> "csr",
-      alu.litValue() -> "alu",
-      mul.litValue() -> "mul",
-      div.litValue() -> "div",
-      fence.litValue() -> "fence",
-      bku.litValue() -> "bku",
-      fmac.litValue() -> "fmac",
-      fmisc.litValue() -> "fmisc",
-      fDivSqrt.litValue() -> "fdiv_fsqrt",
-      ldu.litValue() -> "load",
-      stu.litValue() -> "store",
-      mou.litValue() -> "mou"
+      jmp.litValue -> "jmp",
+      i2f.litValue -> "int_to_float",
+      csr.litValue -> "csr",
+      alu.litValue -> "alu",
+      mul.litValue -> "mul",
+      div.litValue -> "div",
+      fence.litValue -> "fence",
+      bku.litValue -> "bku",
+      fmac.litValue -> "fmac",
+      fmisc.litValue -> "fmisc",
+      fDivSqrt.litValue -> "fdiv_fsqrt",
+      ldu.litValue -> "load",
+      stu.litValue -> "store",
+      mou.litValue -> "mou"
     )
   }
 
@@ -819,8 +819,8 @@ package object xiangshan {
     Seq(f2iCfg, f2fCfg, fdivSqrtCfg),
     Int.MaxValue, 1
   )
-  val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
-  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
+  val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg.copy(exceptionOut = mouCfg.exceptionOut)), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
+  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg.copy(exceptionOut = Seq())), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
   val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
 
   object TopDownCounters extends Enumeration {
