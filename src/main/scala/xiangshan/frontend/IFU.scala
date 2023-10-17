@@ -483,7 +483,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_instr_range    = RegEnable(f2_instr_range, f2_fire)
   val f3_foldpc         = RegEnable(f2_foldpc,      f2_fire)
   val f3_crossPageFault = RegEnable(f2_crossPageFault,      f2_fire)
-  val f3_crossGuestPageFault = RegEnable(next = f2_crossGuestPageFault, enable = f2_fire)
+  val f3_crossGuestPageFault = RegEnable(f2_crossGuestPageFault, f2_fire)
   val f3_hasHalfValid   = RegEnable(f2_hasHalfValid,      f2_fire)
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i) || f3_except_gpf(i)})
   val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_) || f3_except_gpf.reduce(_||_))
