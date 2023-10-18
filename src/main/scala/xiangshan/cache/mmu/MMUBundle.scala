@@ -467,7 +467,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
 
   override def toPrintable: Printable = {
     val inner_level = level.getOrElse(2.U)
-    p"asid: ${asid} vmid: ${vmid} level:${inner_level} vpn:${Hexadecimal(tag)} ppn:${Hexadecimal(ppn)} perm:${perm} s2xlate:${Binary(s2xlate)}"
+    p"asid: ${asid} level:${inner_level} vpn:${Hexadecimal(tag)} ppn:${Hexadecimal(ppn)} perm:${perm}"
   }
 
 }
@@ -624,7 +624,7 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
 
   // Maybe Block req needs a kill: for itlb, itlb and icache may not sync, itlb should wait icache to go ahead
   override def toPrintable: Printable = {
-    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} hyperinst:${hyperinst} hlvx:${hlvx} kill:${kill} pc:0x${Hexadecimal(debug.pc)} robIdx:${debug.robIdx}"
+    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} kill:${kill} pc:0x${Hexadecimal(debug.pc)} robIdx:${debug.robIdx}"
   }
 }
 
@@ -651,10 +651,7 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
     val isFirstIssue = Output(Bool())
   }
   override def toPrintable: Printable = {
-    p"paddr:0x${Hexadecimal(paddr(0))} gpaddr:0x${Hexadecimal(gpaddr(0))} miss:${miss} " +
-      p"excp.pf: ld:${excp(0).pf.ld} st:${excp(0).pf.st} instr:${excp(0).pf.instr} " +
-      p"excp.gpf: ld:${excp(0).gpf.ld} st:${excp(0).gpf.st} instr:${excp(0).gpf.instr}" +
-      p"ptwBack:${ptwBack}"
+    p"paddr:0x${Hexadecimal(paddr(0))} miss:${miss} excp.pf: ld:${excp(0).pf.ld} st:${excp(0).pf.st} instr:${excp(0).pf.instr} ptwBack:${ptwBack}"
   }
 }
 
@@ -939,7 +936,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     // require(num == 4, "if num is not 4, please comment this toPrintable")
     // NOTE: if num is not 4, please comment this toPrintable
     val permsInner = perms.getOrElse(0.U.asTypeOf(Vec(num, new PtePermBundle)))
-    p"asid: ${Hexadecimal(asid)} vmid: ${Hexadecimal(vmid.getOrElse(0.U))} tag:0x${Hexadecimal(tag)} ppns:${printVec(ppns)} vs:${Binary(vs.asUInt)} " +
+    p"asid: ${Hexadecimal(asid)} tag:0x${Hexadecimal(tag)} ppns:${printVec(ppns)} vs:${Binary(vs.asUInt)} " +
       (if (hasPerm) p"perms:${printVec(permsInner)}" else p"")
   }
 }
@@ -1003,7 +1000,7 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
     this.s2xlate =/= noS2xlate
   }
   override def toPrintable: Printable = {
-    p"vpn:0x${Hexadecimal(vpn)} s2xlate:${Binary(s2xlate)}"
+    p"vpn:0x${Hexadecimal(vpn)}"
   }
 }
 
@@ -1072,7 +1069,7 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     val hit0 = entry.tag(vpnLen - 1, vpnnLen * 2) === gvpn(vpnLen - 1, vpnnLen * 2)
     val hit1 = entry.tag(vpnnLen * 2  - 1, vpnnLen) === gvpn(vpnnLen * 2 - 1, vpnnLen)
     val hit2 = entry.tag(vpnnLen - 1, 0) === gvpn(vpnnLen - 1, 0)
-    vmid_hit && hit2 && hit1 && hit0 // Because we only use it when onlyStage2, tags are required to be all matched.
+    vmid_hit && Mux(entry.level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(entry.level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0))
   }
 }
 

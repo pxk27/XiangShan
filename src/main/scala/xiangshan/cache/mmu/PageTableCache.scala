@@ -552,9 +552,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
 
     XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(refill.req_info_dup(0).vpn, io.csr_dup(0).satp.asid, memSelData(0), 0.U, prefetch = refill_prefetch_dup(0))}\n")
-    XSDebug(p"[l1 refill] l1v:${Binary(l1v)} -> ${Binary(l1v | rfOH)}\n")
-    XSDebug(p"[l1 refill] l1g:${Binary(l1g)} -> ${Binary((l1g & ~rfOH) | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
-    XSDebug(p"[l1 refill] l1h:${Binary(l1h(refillIdx))} -> ${Binary(refill.req_info_dup(0).s2xlate)}\n")
+    XSDebug(p"[l1 refill] l1v:${Binary(l1v)}->${Binary(l1v | rfOH)} l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
 
     refillIdx.suggestName(s"l1_refillIdx")
     rfOH.suggestName(s"l1_rfOH")
@@ -593,7 +591,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     XSDebug(p"[l2 refill] refilldata:0x${wdata}\n")
     XSDebug(p"[l2 refill] l2v:${Binary(l2v)} -> ${Binary(l2v | rfvOH)}\n")
     XSDebug(p"[l2 refill] l2g:${Binary(l2g)} -> ${Binary(l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
-    XSDebug(p"[l2 refill] l2h:${Binary(l2h(refillIdx)(victimWay))} -> ${Binary(refill.req_info_dup(1).s2xlate)}\n")
 
     refillIdx.suggestName(s"l2_refillIdx")
     victimWay.suggestName(s"l2_victimWay")
@@ -634,7 +631,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     XSDebug(p"[l3 refill] refilldata:0x${wdata}\n")
     XSDebug(p"[l3 refill] l3v:${Binary(l3v)} -> ${Binary(l3v | rfvOH)}\n")
     XSDebug(p"[l3 refill] l3g:${Binary(l3g)} -> ${Binary(l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
-    XSDebug(p"[l3 refill] l3h:${Binary(l3h(refillIdx)(victimWay))} -> ${Binary(refill.req_info_dup(2).s2xlate)}\n")
 
     refillIdx.suggestName(s"l3_refillIdx")
     victimWay.suggestName(s"l3_victimWay")
@@ -666,9 +662,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
 
     XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(refill.req_info_dup(0).vpn, io.csr_dup(0).satp.asid, memSelData(0), refill.level_dup(0), refill_prefetch_dup(0))}\n")
-    XSDebug(p"[sp refill] spv:${Binary(spv)} -> ${Binary(spv | rfOH)}\n")
-    XSDebug(p"[sp refill] spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
-    XSDebug(p"[sp refill] sph:${Binary(sph(refillIdx))} -> ${Binary(refill.req_info_dup(0).s2xlate)}\n")
+    XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte(0).perm.g, rfOH, 0.U))}\n")
 
     refillIdx.suggestName(s"sp_refillIdx")
     rfOH.suggestName(s"sp_rfOH")
