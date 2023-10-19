@@ -337,15 +337,20 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       val tag_match_hi = tag(vpnnLen * 2 - 1, vpnnLen) === vpn(vpnnLen * 3 - 1, vpnnLen * 2)
       val tag_match_mi = tag(vpnnLen - 1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen)
       val tag_match = tag_match_hi && (level.get.asBool || tag_match_mi)
-      asid_hit && tag_match && addr_low_hit && vmid_hit && pteidx_hit
+      asid_hit && tag_match && ParallelOR(valididx) && vmid_hit && ParallelOR(pteidx)
     }
     else {
       val tmp_level = level.get
       val tag_match_hi = tag(vpnnLen * 3 - sectortlbwidth - 1, vpnnLen * 2 - sectortlbwidth) === vpn(vpnnLen * 3 - 1, vpnnLen * 2)
       val tag_match_mi = tag(vpnnLen * 2 - sectortlbwidth - 1, vpnnLen - sectortlbwidth) === vpn(vpnnLen * 2 - 1, vpnnLen)
       val tag_match_lo = tag(vpnnLen - sectortlbwidth - 1, 0) === vpn(vpnnLen - 1, sectortlbwidth) // if pageNormal is false, this will always be false
+
       val tag_match = tag_match_hi && (tmp_level(1) || tag_match_mi) && (tmp_level(0) || tag_match_lo)
-      asid_hit && tag_match && addr_low_hit && vmid_hit && pteidx_hit
+
+      val sector_valid = Mux(!tmp_level(0), addr_low_hit, ParallelOR(valididx))
+      val pteidx_valid = Mux(!tmp_level(0), pteidx_hit, ParallelOR(pteidx))
+
+      asid_hit && tag_match && sector_valid && vmid_hit && pteidx_valid
     }
   }
 
@@ -360,6 +365,8 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val wb_valididx = Wire(Vec(tlbcontiguous, Bool()))
     wb_valididx := Mux(s2xlate === onlyStage2, VecInit(UIntToOH(data.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), data.s1.valididx)
     val s2xlate_hit = s2xlate === this.s2xlate
+
+    val specific_idx = Wire(Bool())
     // NOTE: for timing, dont care low set index bits at hit check
     //       do not need store the low bits actually
     if (!pageSuper) {
@@ -370,6 +377,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       val tag_match_mi = tag(vpnnLen - 1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen)
       val tag_match = tag_match_hi && (level.get.asBool || tag_match_mi)
       vpn_hit := asid_hit && tag_match
+      specific_idx := false.B
     }
     else {
       val tmp_level = level.get
@@ -378,10 +386,11 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       val tag_match_lo = tag(vpnnLen - sectortlbwidth - 1, 0) === vpn(vpnnLen - 1, sectortlbwidth) // if pageNormal is false, this will always be false
       val tag_match = tag_match_hi && (tmp_level(1) || tag_match_mi) && (tmp_level(0) || tag_match_lo)
       vpn_hit := asid_hit && tag_match
+      specific_idx := !tmp_level(0)
     }
 
     for (i <- 0 until tlbcontiguous) {
-      index_hit(i) := wb_valididx(i) && valididx(i)
+      index_hit(i) := wb_valididx(i) && Mux(specific_idx, valididx(i), ParallelOR(valididx))
     }
 
     // For example, tlb req to page cache with vpn 0x10
@@ -1069,7 +1078,7 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     val hit0 = entry.tag(vpnLen - 1, vpnnLen * 2) === gvpn(vpnLen - 1, vpnnLen * 2)
     val hit1 = entry.tag(vpnnLen * 2  - 1, vpnnLen) === gvpn(vpnnLen * 2 - 1, vpnnLen)
     val hit2 = entry.tag(vpnnLen - 1, 0) === gvpn(vpnnLen - 1, 0)
-    vmid_hit && hit2 && hit1 && hit0
+    vmid_hit && Mux(entry.level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(entry.level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0))
   }
 }
 
