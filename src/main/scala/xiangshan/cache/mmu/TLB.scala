@@ -152,7 +152,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val resp_gpa_refill = RegInit(false.B)
     val need_gpa_vpn_hit = RegEnable(need_gpa_vpn === get_pn(req_in(i).bits.vaddr), req_in(i).fire)
     when (io.requestor(i).resp.valid && hasGpf(i) && need_gpa === false.B && !need_gpa_vpn_hit && !isOnlys2xlate) {
-      XSDebug(p"need_gpa_vpn: ${get_pn(req_out(i).vaddr)}, s2xlate: ${req_out_s2xlate(i)}\n")
       need_gpa := true.B
       need_gpa_vpn := get_pn(req_out(i).vaddr)
       resp_gpa_refill := false.B
