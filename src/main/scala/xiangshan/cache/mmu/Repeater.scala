@@ -184,7 +184,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
     s2xlate === resp.s2xlate && Mux(enableS2xlate && onlyS2, s2hit, s1hit)
   }
 
-  when (io.ptw.req(0).fire =/= io.ptw.resp.fire()) {
+  when (io.ptw.req(0).fire =/= io.ptw.resp.fire) {
     inflight_counter := Mux(io.ptw.req(0).fire, inflight_counter + 1.U, inflight_counter - 1.U)
   }
 
