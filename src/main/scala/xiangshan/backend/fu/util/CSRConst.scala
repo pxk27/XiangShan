@@ -138,6 +138,9 @@ trait HasCSRConst {
   val Mtinst        = 0x34A
   val Mtval2        = 0x34B
 
+  // Machine Configuration
+  val Menvcfg       = 0x30A
+
   // Machine Memory Protection
   // TBD
   val PmpcfgBase    = 0x3A0
