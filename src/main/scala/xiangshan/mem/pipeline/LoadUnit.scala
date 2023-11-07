@@ -157,6 +157,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fast_rep_in  = Flipped(Decoupled(new LqWriteBundle))
     val fast_rep_out = Decoupled(new LqWriteBundle)
 
+    // Load RAR rollback
+    val rollback = Valid(new Redirect)
+
     // perf
     val debug_ls         = Output(new DebugLsInfoBundle)
     val lsTopdownInfo    = Output(new LsTopdownInfo)
@@ -1024,14 +1027,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val (s3_fwd_frm_d_chan, s3_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s2_valid && s2_out.forward_tlDchannel, s2_out.mshrid, s2_out.paddr)
   val s3_fwd_data_valid = RegEnable(s2_fwd_data_valid, false.B, s2_valid)
   val s3_fwd_frm_d_chan_valid = (s3_fwd_frm_d_chan && s3_fwd_data_valid)
-  val s3_nuke          = VecInit((0 until StorePipelineWidth).map(w => {
-                          io.stld_nuke_query(w).valid && // query valid
-                          isAfter(s3_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
-                          // TODO: Fix me when vector instruction
-                          (s3_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
-                          (s3_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
-                        })).asUInt.orR && !s3_in.tlbMiss || s3_in.rep_info.nuke
-
 
   // s3 load fast replay
   io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect)
@@ -1063,11 +1058,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       RegNext(io.csrCtrl.ldld_vio_check_enable)
 
   val s3_rep_info = WireInit(s3_in.rep_info)
-  s3_rep_info.wpu_fail      := s3_in.rep_info.wpu_fail && !s3_fwd_frm_d_chan_valid && s3_troublem
-  s3_rep_info.bank_conflict := s3_in.rep_info.bank_conflict && !s3_fwd_frm_d_chan_valid && s3_troublem
   s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && !s3_fwd_frm_d_chan_valid && s3_troublem
-  s3_rep_info.nuke          := s3_nuke && s3_troublem
-  val s3_rep_frm_fetch = s3_vp_match_fail || s3_ldld_rep_inst
+  val s3_flushPipe = s3_ldld_rep_inst
+  val s3_rep_frm_fetch = s3_vp_match_fail
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
   val s3_force_rep     = s3_sel_rep_cause(LoadReplayCauses.C_TM) &&
                          !s3_in.uop.cf.exceptionVec(loadAddrMisaligned) &&
@@ -1084,6 +1077,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.valid                := s3_valid && !io.lsq.ldin.bits.rep_info.need_rep && !s3_in.mmio
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.cf.exceptionVec(loadAccessFault) := s3_dly_ld_err  || s3_in.uop.cf.exceptionVec(loadAccessFault)
+  s3_out.bits.uop.ctrl.flushPipe := false.B
   s3_out.bits.uop.ctrl.replayInst := s3_rep_frm_fetch
   s3_out.bits.data            := s3_in.data
   s3_out.bits.redirectValid   := false.B
@@ -1098,6 +1092,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s3_out.bits.uop.cf.exceptionVec := 0.U.asTypeOf(s3_in.uop.cf.exceptionVec.cloneType)
   }
 
+  io.rollback.valid := s3_out.valid && !s3_rep_frm_fetch && s3_flushPipe
+  io.rollback.bits             := DontCare
+  io.rollback.bits.isRVC       := s3_out.bits.uop.cf.pd.isRVC
+  io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
+  io.rollback.bits.ftqIdx      := s3_out.bits.uop.cf.ftqPtr
+  io.rollback.bits.ftqOffset   := s3_out.bits.uop.cf.ftqOffset
+  io.rollback.bits.level       := RedirectLevel.flushAfter
+  io.rollback.bits.cfiUpdate.target := s3_out.bits.uop.cf.pc
+  io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
   io.lsq.ldin.bits.uop := s3_out.bits.uop
