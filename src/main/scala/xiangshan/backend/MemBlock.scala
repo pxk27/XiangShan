@@ -20,8 +20,9 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
+import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import freechips.rocketchip.tilelink.TLBuffer
+import freechips.rocketchip.tilelink.{TLBuffer, TLIdentityNode}
 import coupledL2.PrefetchRecv
 import utils._
 import utility._
@@ -104,6 +105,23 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
   val itlb = Flipped(new TlbPtwIO())
 }
 
+// Frontend bus goes through MemBlock
+class FrontendBridge()(implicit p: Parameters) extends LazyModule {
+  val icache_node = TLIdentityNode()
+  val instr_uncache_node = TLIdentityNode()
+  lazy val module = new LazyModuleImp(this) {
+    icache_node.in.zip(icache_node.out).foreach{ x =>
+      x._2._1 <> x._1._1
+      dontTouch(x._1._1)
+      dontTouch(x._2._1)
+    }
+    instr_uncache_node.in.zip(instr_uncache_node.out).foreach{ x =>
+      x._2._1 <> x._1._1
+      dontTouch(x._1._1)
+      dontTouch(x._2._1)
+    }
+  }
+}
 
 class MemBlock()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasWritebackSource {
@@ -119,6 +137,11 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val l3_pf_sender_opt = coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new huancun.PrefetchRecv)
   )
+  val frontendBridge = LazyModule(new FrontendBridge)
+  // interrupt sinks
+  val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
+  val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
+  val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
 
   if (!coreParams.softPTW) {
     ptw_to_l2_buffer.node := ptw.node
@@ -140,6 +163,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasWritebackSourceImp
   with HasPerfEvents
   with HasL1PrefetchSourceParameter
+  with HasCircularQueuePtrHelper
 {
 
   val io = IO(new Bundle {
@@ -174,7 +198,38 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val toCore = new MemCoreTopDownIO
     }
     val debugRolling = Flipped(new RobDebugRollingIO)
+
+    // All the signals from/to frontend/backend to/from bus will go through MemBlock
+    val externalInterrupt = Flipped(new ExternalInterruptIO)
+    val inner_hartId = Output(UInt(64.W))
+    val inner_reset_vector = Output(UInt(PAddrBits.W))
+    val outer_reset_vector = Input(UInt(PAddrBits.W))
+    val inner_cpu_halt = Input(Bool())
+    val outer_cpu_halt = Output(Bool())
+    val inner_beu_errors_icache = Input(new L1BusErrorUnitInfo)
+    val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
+    val inner_l2_pf_enable = Input(Bool())
+    val outer_l2_pf_enable = Output(Bool())
+    // val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+    // val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
   })
+
+  // reset signals of frontend & backend are generated in memblock
+  val reset_io_frontend = IO(Output(Reset()))
+  val reset_io_backend = IO(Output(Reset()))
+
+  dontTouch(io.externalInterrupt)
+  dontTouch(io.inner_hartId)
+  dontTouch(io.inner_reset_vector)
+  dontTouch(io.outer_reset_vector)
+  dontTouch(io.inner_cpu_halt)
+  dontTouch(io.outer_cpu_halt)
+  dontTouch(io.inner_beu_errors_icache)
+  dontTouch(io.outer_beu_errors_icache)
+  dontTouch(io.inner_l2_pf_enable)
+  dontTouch(io.outer_l2_pf_enable)
+  // dontTouch(io.inner_hc_perfEvents)
+  // dontTouch(io.outer_hc_perfEvents)
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.mem_to_ooo.writeback))
 
@@ -201,6 +256,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
+  dcache.io.sms_agt_evict_req.ready := false.B
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
@@ -209,6 +265,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       sms.io_act_threshold := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
       sms.io_act_stride := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
       sms.io_stride_en := false.B
+      sms.io_dcache_evict <> dcache.io.sms_agt_evict_req
       sms
   }
   prefetcherOpt.foreach{ pf => pf.io.l1_req.ready := false.B }
@@ -769,12 +826,36 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
 
-//  lsq.io.rob            <> io.lsqio.rob
+  //  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq
   lsq.io.brqRedirect    <> redirect
-  io.mem_to_ooo.memoryViolation    <> lsq.io.rollback
+
+  //  violation rollback
+  def selectOldest[T <: Redirect](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
+    assert(valid.length == bits.length)
+    if (valid.length == 0 || valid.length == 1) {
+      (valid, bits)
+    } else if (valid.length == 2) {
+      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
+      for (i <- res.indices) {
+        res(i).valid := valid(i)
+        res(i).bits := bits(i)
+      }
+      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).robIdx, bits(1).robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
+      (Seq(oldest.valid), Seq(oldest.bits))
+    } else {
+      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
+      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
+      selectOldest(left._1 ++ right._1, left._2 ++ right._2)
+    }
+  }
+  val rollback = lsq.io.rollback +: loadUnits.map(_.io.rollback)
+  val rollbackSel = selectOldest(rollback.map(_.valid), rollback.map(_.bits))
+  io.mem_to_ooo.memoryViolation.valid := rollbackSel._1(0)
+  io.mem_to_ooo.memoryViolation.bits  := rollbackSel._2(0)
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept
+
   // lsq.io.uncache        <> uncache.io.lsq
   AddPipelineReg(lsq.io.uncache.req, uncache.io.lsq.req, false.B)
   AddPipelineReg(uncache.io.lsq.resp, lsq.io.uncache.resp, false.B)
@@ -904,6 +985,35 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
+
+  io.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
+  io.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
+  io.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
+  io.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
+  io.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
+  io.inner_hartId := io.hartId
+  io.inner_reset_vector := io.outer_reset_vector
+  io.outer_cpu_halt := io.inner_cpu_halt
+  io.outer_beu_errors_icache := io.inner_beu_errors_icache
+  io.outer_l2_pf_enable := io.inner_l2_pf_enable
+  // io.inner_hc_perfEvents <> io.outer_hc_perfEvents
+
+  if (p(DebugOptionsKey).FPGAPlatform) {
+    val resetTree = ResetGenNode(
+      Seq(
+        ResetGenNode(Seq(ResetGenNode(Seq(CellNode(reset_io_frontend))))),
+        CellNode(reset_io_backend),
+        ModuleNode(itlbRepeater2),
+        ModuleNode(dtlbRepeater2),
+        ModuleNode(ptw),
+        ModuleNode(ptw_to_l2_buffer)
+      )
+    )
+    ResetGen(resetTree, reset, !p(DebugOptionsKey).FPGAPlatform)
+  } else {
+    reset_io_frontend := DontCare
+    reset_io_backend := DontCare
+  }
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
