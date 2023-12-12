@@ -325,7 +325,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hVec_delay = RegEnable(hVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).zip(hVec_delay).map { case ((wayData, v), h) =>
-      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid, io.csr_dup(1).hgatp.asid, s2xlate = delay_h =/= noS2xlate) && v && (delay_h === h)})
+      wayData.entries.hit(delay_vpn, Mux(delay_h =/= noS2xlate, io.csr_dup(1).vsatp.asid, io.csr_dup(1).satp.asid), io.csr_dup(1).hgatp.asid, s2xlate = delay_h =/= noS2xlate) && v && (delay_h === h)})
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
@@ -377,7 +377,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hVec_delay = RegEnable(hVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).zip(hVec_delay).map { case ((wayData, v), h) =>
-      wayData.entries.hit(delay_vpn, io.csr_dup(2).satp.asid, io.csr_dup(2).hgatp.asid, s2xlate = delay_h =/= noS2xlate) && v && (delay_h === h)})
+      wayData.entries.hit(delay_vpn, Mux(delay_h =/= noS2xlate, io.csr_dup(2).vsatp.asid, io.csr_dup(2).satp.asid), io.csr_dup(2).hgatp.asid, s2xlate = delay_h =/= noS2xlate) && v && (delay_h === h)})
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
@@ -643,7 +643,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val rfOH = UIntToOH(refillIdx)
     sp(refillIdx).refill(
       refill.req_info_dup(0).vpn,
-      io.csr_dup(0).satp.asid,
+      Mux(refill.req_info_dup(0).s2xlate =/= noS2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid),
       io.csr_dup(0).hgatp.asid,
       memSelData(0),
       refill.level_dup(2),
