@@ -143,7 +143,11 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val gpaddr = MuxCase(mem_addr, Seq(
     stage1Hit -> Cat(stage1.genPPN(), 0.U(offLen.W)),
     onlyS2xlate -> Cat(vpn, 0.U(offLen.W)),
-    !s_last_hptw_req -> Cat(pte.ppn, 0.U(offLen.W))
+    !s_last_hptw_req -> Cat(MuxLookup(level, pte.ppn)(Seq(
+      0.U -> Cat(pte.ppn(ppnLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(pte.ppn(ppnLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)
+    ))), 
+    0.U(offLen.W))
   ))
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
 
