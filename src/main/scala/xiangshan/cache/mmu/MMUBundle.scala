@@ -845,7 +845,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
 
   def genPPN(vpn: UInt): UInt = {
     if (!hasLevel) ppn
-    else MuxLookup(level.get, 0.U, Seq(
+    else MuxLookup(level.get, 0.U)(Seq(
           0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn(vpnnLen*2-1, 0)),
           1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen-1, 0)),
           2.U -> ppn)
@@ -1157,7 +1157,7 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
 
 
   def genPPN(vpn: UInt): UInt = {
-    MuxLookup(entry.level.get, 0.U, Seq(
+    MuxLookup(entry.level.get, 0.U)(Seq(
       0.U -> Cat(entry.ppn(entry.ppn.getWidth-1, vpnnLen * 2 - sectortlbwidth), vpn(vpnnLen*2-1, 0)),
       1.U -> Cat(entry.ppn(entry.ppn.getWidth-1, vpnnLen - sectortlbwidth), vpn(vpnnLen-1, 0)),
       2.U -> Cat(entry.ppn(entry.ppn.getWidth-1, 0), ppn_low(vpn(sectortlbwidth - 1, 0))))

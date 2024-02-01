@@ -80,7 +80,6 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", enbale_tllog)
   val l1i_logger = TLLogger(s"L2_L1I_${coreParams.HartId}", enbale_tllog)
   val ptw_logger = TLLogger(s"L2_PTW_${coreParams.HartId}", enbale_tllog)
-  val l1i_to_l2_buffer = LazyModule(new TLBuffer)
   val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val i_mmio_buffer = LazyModule(new TLBuffer)
 
@@ -141,7 +140,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     dontTouch(hartId)
     dontTouch(cpu_halt)
 
-    val l2_hint = IO(ValidIO(UInt(32.W))) // TODO: parameterize this
+    val l2_hint = IO(ValidIO(new L2ToL1Hint())) // TODO: parameterize this
     if (l2cache.isDefined) {
       l2_hint := l2cache.get.module.io.l2_hint
       // debugTopDown <> l2cache.get.module.io.debugTopDown

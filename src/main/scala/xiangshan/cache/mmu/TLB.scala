@@ -285,6 +285,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     when (io.requestor(idx).req_kill && RegNext(io.requestor(idx).req.fire)) {
       io.ptw.req(idx).valid := false.B
       io.tlbreplay(idx) := true.B
+      io.tlbreplay(idx) := true.B
     }
     io.ptw.req(idx).bits.vpn := get_pn(req_out(idx).vaddr)
     io.ptw.req(idx).bits.s2xlate := req_s2xlate
