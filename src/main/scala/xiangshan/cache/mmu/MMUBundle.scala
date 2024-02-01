@@ -233,7 +233,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
   def apply(item: PtwRespS2, pm: PMPConfig): TlbEntry = {
     this.asid := item.s1.entry.asid
     val inner_level = item.s1.entry.level.getOrElse(0.U) max item.s2.entry.level.getOrElse(0.U)
-    this.level.map(_ := { if (pageNormal && pageSuper) MuxLookup(inner_level, 0.U, Seq(
+    this.level.map(_ := { if (pageNormal && pageSuper) MuxLookup(inner_level, 0.U)(Seq(
       0.U -> 3.U,
       1.U -> 1.U,
       2.U -> 0.U ))
@@ -397,13 +397,13 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
 
   def apply(item: PtwRespS2): TlbSectorEntry = {
     this.asid := item.s1.entry.asid
-    val inner_level = MuxLookup(item.s2xlate, 2.U, Seq(
+    val inner_level = MuxLookup(item.s2xlate, 2.U)(Seq(
       onlyStage1 -> item.s1.entry.level.getOrElse(0.U),
       onlyStage2 -> item.s2.entry.level.getOrElse(0.U),
       allStage -> (item.s1.entry.level.getOrElse(0.U) max item.s2.entry.level.getOrElse(0.U)),
       noS2xlate -> item.s1.entry.level.getOrElse(0.U)
     ))
-    this.level.map(_ := { if (pageNormal && pageSuper) MuxLookup(inner_level, 0.U, Seq(
+    this.level.map(_ := { if (pageNormal && pageSuper) MuxLookup(inner_level, 0.U)(Seq(
                                                         0.U -> 3.U,
                                                         1.U -> 1.U,
                                                         2.U -> 0.U ))
@@ -1218,7 +1218,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
   def genPPN(): UInt = {
     val idx = OHToUInt(pteidx)
     val tag = Cat(entry(idx).tag, idx(sectortlbwidth - 1, 0))
-    MuxLookup(entry(idx).level.get, 0.U, Seq(
+    MuxLookup(entry(idx).level.get, 0.U)(Seq(
       0.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen * 2 - sectortlbwidth), tag(vpnnLen * 2 - 1, 0)),
       1.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen - sectortlbwidth), tag(vpnnLen - 1, 0)),
       2.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, 0), entry(idx).ppn_low))
@@ -1233,7 +1233,7 @@ class HptwMergeResp(implicit p: Parameters) extends PtwBundle {
 
   def genPPN(): UInt = {
     val idx = OHToUInt(pteidx)
-    MuxLookup(entry(idx).level.get, 0.U, Seq(
+    MuxLookup(entry(idx).level.get, 0.U)(Seq(
       0.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen * 2 - sectortlbwidth), entry(idx).tag(vpnnLen * 2 - 1, 0)),
       1.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen - sectortlbwidth), entry(idx).tag(vpnnLen - 1, 0)),
       2.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, 0), entry(idx).ppn_low))
