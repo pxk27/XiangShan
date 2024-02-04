@@ -1164,18 +1164,20 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     )
   }
 
-  def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool): Bool = {
+  def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: UInt, s2_level: UInt): Bool = {
     require(vpn.getWidth == vpnLen)
     //    require(this.asid.getWidth <= asid.getWidth)
+    val hasS2xlate = s2xlate =/= noS2xlate
+    val hasAllStage = s2xlate === allStage
     val asid_hit = if (ignoreAsid) true.B else (this.entry.asid === asid)
-    val vmid_hit = Mux(s2xlate, this.entry.vmid.getOrElse(0.U) === vmid, true.B)
+    val vmid_hit = Mux(hasS2xlate, this.entry.vmid.getOrElse(0.U) === vmid, true.B)
     if (allType) {
       val hit0 = entry.tag(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth) === vpn(vpnLen - 1, vpnnLen * 2)
       val hit1 = entry.tag(vpnnLen * 2 - sectortlbwidth - 1, vpnnLen - sectortlbwidth)   === vpn(vpnnLen * 2 - 1,  vpnnLen)
       val hit2 = entry.tag(vpnnLen - sectortlbwidth - 1, 0) === vpn(vpnnLen - 1, sectortlbwidth)
       val addr_low_hit = valididx(vpn(sectortlbwidth - 1, 0))
-
-      asid_hit && vmid_hit && Mux(entry.level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(entry.level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0)) && addr_low_hit
+      
+      asid_hit && vmid_hit && Mux(entry.level.getOrElse(0.U) === 2.U || (hasAllStage && s2_level === 2.U), hit2 && hit1 && hit0, Mux(entry.level.getOrElse(0.U) === 1.U || (hasAllStage && s2_level === 1.U), hit1 && hit0, hit0)) && addr_low_hit
     } else {
       val hit0 = entry.tag(sectorvpnLen - 1, sectorvpnLen - vpnnLen) === vpn(vpnLen - 1, vpnLen - vpnnLen)
       val hit1 = entry.tag(sectorvpnLen - vpnnLen - 1, sectorvpnLen - vpnnLen * 2) === vpn(vpnLen - vpnnLen - 1, vpnLen - vpnnLen * 2)
@@ -1302,7 +1304,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   }
   
   def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = { 
-    val s1_hit = s1.hit(vpn, Mux(this.hasS2xlate(), vasid, asid), vmid, allType, ignoreAsid, this.hasS2xlate)
+    val s1_hit = s1.hit(vpn, Mux(this.hasS2xlate(), vasid, asid), vmid, allType, ignoreAsid, this.s2xlate, s2.entry.level.getOrElse(0.U))
     val s2_hit = s2.hit(vpn, vmid)
     Mux(s2xlate === onlyStage2, s2_hit, s1_hit)
   }

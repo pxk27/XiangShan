@@ -477,9 +477,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
 
   for (i <- 0 until PtwWidth) {
+    val s2_touched_level = Mux(mergeArb(i).out.bits.s2xlate === allStage, mergeArb(i).out.bits.s2.entry.level.getOrElse(0.U), 0.U)
+
     outArb(i).in(0).valid := mergeArb(i).out.valid
     outArb(i).in(0).bits.s2xlate := mergeArb(i).out.bits.s2xlate
-    outArb(i).in(0).bits.s1 := merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits.s1)
+    outArb(i).in(0).bits.s1 := merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits.s1, s2_touched_level)
     outArb(i).in(0).bits.s2 := mergeArb(i).out.bits.s2
   }
 
@@ -541,7 +543,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     ptw_merge_resp
   }
 
-  def merge_ptwResp_to_sector_ptwResp(pte: PtwMergeResp) : PtwSectorResp = {
+  def merge_ptwResp_to_sector_ptwResp(pte: PtwMergeResp, s2_touched_level: UInt) : PtwSectorResp = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val ptw_sector_resp = Wire(new PtwSectorResp)
     ptw_sector_resp.entry.tag := pte.entry(OHToUInt(pte.pteidx)).tag
@@ -562,7 +564,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       val v_equal = pte.entry(i).v === pte.entry(OHToUInt(pte.pteidx)).v
       val af_equal = pte.entry(i).af === pte.entry(OHToUInt(pte.pteidx)).af
       val pf_equal = pte.entry(i).pf === pte.entry(OHToUInt(pte.pteidx)).pf
-      ptw_sector_resp.valididx(i) := (ppn_equal && perm_equal && v_equal && af_equal && pf_equal) || !pte.not_super
+      ptw_sector_resp.valididx(i) := ((ppn_equal && perm_equal && v_equal && af_equal && pf_equal) || !pte.not_super) && !(s2_touched_level === 2.U)
       ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
     }
     ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B
