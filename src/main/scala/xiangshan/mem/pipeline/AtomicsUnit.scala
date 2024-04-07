@@ -368,6 +368,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     atom_override_xtval := false.B
   }
 
+  /*
   // atomic trigger
   val csrCtrl = io.csrCtrl
   val tdata = Reg(Vec(6, new MatchTriggerIO))
@@ -443,6 +444,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.out.bits.uop.cf.trigger.backendHit(4) := backendTriggerHitReg(4)
   }
 
+  */
+  
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)
     difftest.coreid := io.hartId

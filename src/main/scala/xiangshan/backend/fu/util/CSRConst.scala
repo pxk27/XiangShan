@@ -55,6 +55,9 @@ trait HasCSRConst {
   val Stvec         = 0x105
   val Scounteren    = 0x106
 
+  // Supervisor Configuration
+  val Senvcfg       = 0x10A
+
   // Supervisor Trap Handling
   val Sscratch      = 0x140
   val Sepc          = 0x141
@@ -137,6 +140,9 @@ trait HasCSRConst {
   val Mip           = 0x344
   val Mtinst        = 0x34A
   val Mtval2        = 0x34B
+
+  // Machine Configuration
+  val Menvcfg       = 0x30A
 
   // Machine Configuration
   val Menvcfg       = 0x30A
